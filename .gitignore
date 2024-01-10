@@ -1,0 +1,13 @@
+__pycache__/
+
+*.DS_store
+*.sh
+*.out
+*.err
+test*
+
+
+/logs*/
+/slurm_out/
+/kl_test/
+/scripts/translation_DDIB.py
