@@ -1017,7 +1017,7 @@ class GaussianDiffusion:
                                     model_kwargs=model_kwargs_reverse)
                     
                     x_t = out_re['sample']
-                    # noise = out_re['eps']
+                   
                 
                 out = self.ddim_sample(
                             model, x_t, t_batch,

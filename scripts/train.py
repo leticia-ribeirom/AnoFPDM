@@ -3,7 +3,8 @@ Train a diffusion model on images.
 """
 import sys
 import os
-sys.path.append(os.path.realpath('./'))
+
+sys.path.append(os.path.realpath("./"))
 
 import argparse
 import pathlib
@@ -23,57 +24,61 @@ from sample import sample
 def main():
     args = create_argparser().parse_args()
 
-    
     dist_util.setup_dist()
     logger.configure()
-    
+
     args.w = args.w if isinstance(args.w, list) else [args.w]
-    
+
     args.num_classes = int(args.num_classes) if int(args.num_classes) > 0 else None
-    
+
     logger.log(f"args: {args}")
 
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
-    
+
     # get model size
     model_size = 0
     for param in model.parameters():
         model_size += param.data.nelement()
-    logger.log('Model params: %.2f M' % (model_size / 1024 / 1024))
-    
+    logger.log("Model params: %.2f M" % (model_size / 1024 / 1024))
+
     pathlib.Path(args.image_dir).mkdir(parents=True, exist_ok=True)
-    
+
     model.to(dist_util.dev())
-    
+
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
     logger.log("creating data loader...")
 
-    if args.name.lower() == 'brats':
+    if args.name.lower() == "brats":
         kwargs = dict(
-            n_healthy_patients=int(args.n_healthy_patients) if args.n_healthy_patients is not None else None, 
-            n_tumour_patients=int(args.n_tumour_patients) if args.n_tumour_patients is not None else None,
-            mixed=args.mixed)
+            n_healthy_patients=int(args.n_healthy_patients)
+            if args.n_healthy_patients is not None
+            else None,
+            n_tumour_patients=int(args.n_tumour_patients)
+            if args.n_tumour_patients is not None
+            else None,
+            mixed=args.mixed,
+        )
     else:
         kwargs = dict()
-   
-    
-    data = get_data_iter(args.name, 
-                         args.data_dir, 
-                         args.batch_size,
-                         split=args.split,
-                         ret_lab=args.ret_lab,
-                         logger=logger,
-                         training=args.training,
-                         kwargs=kwargs) 
-    
+
+    data = get_data_iter(
+        args.name,
+        args.data_dir,
+        args.batch_size,
+        split=args.split,
+        ret_lab=args.ret_lab,
+        logger=logger,
+        training=args.training,
+        kwargs=kwargs,
+    )
+
     check_data(data, args.image_dir, name=args.name, split=args.split)
 
-
     logger.log("training...")
-    
+
     TrainLoop(
         model=model,
         diffusion=diffusion,
@@ -95,8 +100,8 @@ def main():
         threshold=args.threshold,
         w=args.w,
         num_classes=args.num_classes,
-        name = args.name,
-        sample_fn=sample
+        name=args.name,
+        sample_fn=sample,
     ).run_loop()
 
 
@@ -126,25 +131,20 @@ def create_argparser():
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--sample_shape",
-        type=int,
-        nargs="+",
-        help="sample shape"
-    )
-    
+    parser.add_argument("--sample_shape", type=int, nargs="+", help="sample shape")
+
     parser.add_argument(
         "--w",
         type=float,
         nargs="+",
         help="weight for clf-free samples",
-        default=-1. # disabled in default
+        default=-1.0,  # disabled in default
     )
     parser.add_argument(
         "--threshold",
         type=float,
         help="threshold for clf-free training",
-        default=-1. # disabled in default
+        default=-1.0,  # disabled in default
     )
     add_dict_to_argparser(parser, defaults)
     return parser
