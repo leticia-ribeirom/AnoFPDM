@@ -16,12 +16,19 @@ def evaluate(
     recon_mask: torch.Tensor,
     source: torch.Tensor,
     ano_map: torch.Tensor,
+    cc_filter=True,
+    meadian_filter=True
 ):
     """
     real_mask: [b, 1, h, w]; recon_mask: [b, 1, h, w];
     ano_map: [b, 1, h, w]; source: [b, n_mod, h, w]
     Rerurn a dict of average metrics (float) for each batch
     """
+    if meadian_filter:
+        ano_map = median_pool(ano_map, kernel_size=5, stride=1, padding=1)
+    if cc_filter:
+        recon_mask = connected_components_3d(recon_mask, thr=40)
+        
     dice_batch = dice_coeff(real_mask, recon_mask)
     iou_batch = IoU(real_mask, recon_mask)
     precision_batch = precision(real_mask, recon_mask)

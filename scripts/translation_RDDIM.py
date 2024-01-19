@@ -20,11 +20,7 @@ from guided_diffusion.script_util import (
 from data import get_brats_data_iter, check_data
 
 from evaluate import (
-    dice_coeff,
-    precision,
-    recall,
-    ROC_AUC,
-    AUC_score,
+    
     connected_components_3d,
     get_stats,
     median_pool,
@@ -120,12 +116,11 @@ def get_mask_batch(
         
         # collect the predicted mask and map
         mapp /= mse.shape[2]
-        mapp = median_pool(mapp, kernel_size=5, stride=1, padding=2)
         batch_map[sample_num] = mapp 
         
         if sim <= thr_01:
             mask = mapp >= (thr/mse.shape[2])
-            batch_mask[sample_num] = connected_components_3d(mask, thr=40)
+            batch_mask[sample_num] = mask.float()
             pred_lab.append(1)
         else:
             pred_lab.append(0)
