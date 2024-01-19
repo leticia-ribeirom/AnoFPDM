@@ -167,7 +167,7 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     # print(f"abe_diff_1: {abe_diff_1.shape}")
     abe_max = torch.max(abe_diff_1, dim=1)[0] # N_val_1 x n_modality
     print(f"abe_max: {abe_max.shape}")
-    return thr_01, abe_max.min(dim=0), abe_max.max(dim=0)
+    return thr_01, abe_max.min(dim=0)[0], abe_max.max(dim=0)[0]
 
 
 def main():
@@ -229,45 +229,45 @@ def main():
         source_val, _, lab_val = next(data_val)
         source_val = source_val.to(dist_util.dev())
 
-        y0 = torch.ones(source_val.shape[0], dtype=torch.long) *\
-                torch.arange(start = 0, end = 1).reshape(-1, 1) # 0 for healthy
-        y0 = y0.reshape(-1,1).squeeze().to(dist_util.dev())
+    #     y0 = torch.ones(source_val.shape[0], dtype=torch.long) *\
+    #             torch.arange(start = 0, end = 1).reshape(-1, 1) # 0 for healthy
+    #     y0 = y0.reshape(-1,1).squeeze().to(dist_util.dev())
 
-        model_kwargs_reverse = {'threshold':-1, 'clf_free':True, 'null':args.null}
-        model_kwargs = {'y': y0, 'threshold':-1, 'clf_free':True}
-        minibatch_metrics = diffusion.calc_pred_xstart_loop(
-                                                            model, source_val, args.w,
-                                                            modality=args.modality,
-                                                            d_reverse=args.d_reverse,
-                                                            sample_steps=args.rev_steps,
-                                                            model_kwargs=model_kwargs,
-                                                            model_kwargs_reverse=model_kwargs_reverse)
+    #     model_kwargs_reverse = {'threshold':-1, 'clf_free':True, 'null':args.null}
+    #     model_kwargs = {'y': y0, 'threshold':-1, 'clf_free':True}
+    #     minibatch_metrics = diffusion.calc_pred_xstart_loop(
+    #                                                         model, source_val, args.w,
+    #                                                         modality=args.modality,
+    #                                                         d_reverse=args.d_reverse,
+    #                                                         sample_steps=args.rev_steps,
+    #                                                         model_kwargs=model_kwargs,
+    #                                                         model_kwargs_reverse=model_kwargs_reverse)
 
-        mse = (minibatch_metrics['xstart'] - source_val[:, args.modality, ...].unsqueeze(1))**2 # batch_size x sample_steps x n_modality x 128 x 128
-        # mse = torch.mean(mse, dim=2, keepdim=True) # batch_size x sample_steps x 1 x 128 x 128
+    #     mse = (minibatch_metrics['xstart'] - source_val[:, args.modality, ...].unsqueeze(1))**2 # batch_size x sample_steps x n_modality x 128 x 128
+    #     # mse = torch.mean(mse, dim=2, keepdim=True) # batch_size x sample_steps x 1 x 128 x 128
 
-        mse_null = (minibatch_metrics['xstart_null'] - source_val[:, args.modality, ...].unsqueeze(1))**2
-        # mse_null = torch.mean(mse_null, dim=2, keepdim=True)
+    #     mse_null = (minibatch_metrics['xstart_null'] - source_val[:, args.modality, ...].unsqueeze(1))**2
+    #     # mse_null = torch.mean(mse_null, dim=2, keepdim=True)
 
-        abe_diff = torch.abs((mse - mse_null)) # batch_size x sample_steps x n_modality x 128 x 128
+    #     abe_diff = torch.abs((mse - mse_null)) # batch_size x sample_steps x n_modality x 128 x 128
         
-        mse_flat = torch.mean(mse, dim=(3,4)) # batch_size x sample_steps x n_modality
-        mse_null_flat = torch.mean(mse_null, dim=(3,4))
-        abe_diff_flat = torch.mean(abe_diff, dim=(3,4))
+    #     mse_flat = torch.mean(mse, dim=(3,4)) # batch_size x sample_steps x n_modality
+    #     mse_null_flat = torch.mean(mse_null, dim=(3,4))
+    #     abe_diff_flat = torch.mean(abe_diff, dim=(3,4))
 
-        MSE.append(mse_flat)
-        MSE_NULL.append(mse_null_flat)
-        ABE_DIFF.append(abe_diff_flat)
-        LAB.append(lab_val)
+    #     MSE.append(mse_flat)
+    #     MSE_NULL.append(mse_null_flat)
+    #     ABE_DIFF.append(abe_diff_flat)
+    #     LAB.append(lab_val)
 
-    MSE = torch.cat(MSE, dim=0)
-    MSE_NULL = torch.cat(MSE_NULL, dim=0)
-    ABE_DIFF = torch.cat(ABE_DIFF, dim=0)
-    LAB = torch.cat(LAB, dim=0)
-    thr_01, abe_min, abe_max = cal_cos_and_abe_range(MSE, MSE_NULL, ABE_DIFF, LAB)
-    logger.log(f'num_val_samples: {MSE.shape[0]}, healthy: {torch.where(LAB == 0)[0].shape[0]}, tumour: {torch.where(LAB == 1)[0].shape[0]}')
-    logger.log(f'abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}')
-    # print(f"MSE: {MSE.shape}, MSE_NULL: {MSE_NULL.shape}, ABE_DIFF: {ABE_DIFF.shape}")
+    # MSE = torch.cat(MSE, dim=0)
+    # MSE_NULL = torch.cat(MSE_NULL, dim=0)
+    # ABE_DIFF = torch.cat(ABE_DIFF, dim=0)
+    # LAB = torch.cat(LAB, dim=0)
+    # thr_01, abe_min, abe_max = cal_cos_and_abe_range(MSE, MSE_NULL, ABE_DIFF, LAB)
+    # logger.log(f'num_val_samples: {MSE.shape[0]}, healthy: {torch.where(LAB == 0)[0].shape[0]}, tumour: {torch.where(LAB == 1)[0].shape[0]}')
+    # logger.log(f'abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}')
+    # # print(f"MSE: {MSE.shape}, MSE_NULL: {MSE_NULL.shape}, ABE_DIFF: {ABE_DIFF.shape}")
 
     logger.log(f"starting to evaluate ...")
     DICE = []
@@ -322,9 +322,15 @@ def main():
         )
 
         #### w = 2
-        # thr_01 = 0.9946
-        # abe_min = torch.tensor([0, 0], device=dist_util.dev()) 
-        # abe_max = torch.tensor([0.138, 0.113], device=dist_util.dev())
+        if args.d_reverse:
+            thr_01 = 0.9945
+            abe_min = torch.tensor([0.0021, 0.0014], device=dist_util.dev()) 
+            abe_max = torch.tensor([0.143, 0.145], device=dist_util.dev())
+        else:
+            ## random
+            thr_01 = 0.9840
+            abe_min = torch.tensor([0.0023, 0.0018], device=dist_util.dev())
+            abe_max = torch.tensor([0.247, 0.174], device=dist_util.dev())
 
         # collect metrics
         pred_mask, pred_lab, pred_map = get_mask_batch(
