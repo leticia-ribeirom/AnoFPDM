@@ -16,25 +16,33 @@ def evaluate(
     recon_mask: torch.Tensor,
     source: torch.Tensor,
     ano_map: torch.Tensor,
+    label: torch.Tensor = None,
     cc_filter=True,
-    meadian_filter=True
 ):
     """
     real_mask: [b, 1, h, w]; recon_mask: [b, 1, h, w];
     ano_map: [b, 1, h, w]; source: [b, n_mod, h, w]
+    label: [b] - 0 for normal, 1 for anomalous, image-level label
+    if label is not none, only evaluate on anomalous samples
     Rerurn a dict of average metrics (float) for each batch
     """
-    if meadian_filter:
-        ano_map = median_pool(ano_map, kernel_size=5, stride=1, padding=1)
+    if label is not None:
+        real_mask = real_mask[torch.where(label == 1)[0], ...]
+        recon_mask = recon_mask[torch.where(label == 1)[0], ...]
+        source = source[torch.where(label == 1)[0], ...]
+        ano_map = ano_map[torch.where(label == 1)[0], ...]
+        
+    
     if cc_filter:
         recon_mask = connected_components_3d(recon_mask, thr=40)
-        
+    
     dice_batch = dice_coeff(real_mask, recon_mask)
     iou_batch = IoU(real_mask, recon_mask)
     precision_batch = precision(real_mask, recon_mask)
     recall_batch = recall(real_mask, recon_mask)
     fpr, tpr, _ = ROC_AUC(source, real_mask, ano_map)
     AUC_score_batch = auc(fpr, tpr)
+     
     return {
         "dice": dice_batch,
         "iou": iou_batch,
@@ -89,16 +97,18 @@ def AUC_score(fpr, tpr):
     return auc(fpr, tpr)
 
 
-# image-level metrics
+# image-level classification metrics
 def get_stats(Y, PRED_Y):
     Y = torch.cat(Y, dim=0)
     PRED_Y = torch.cat(PRED_Y, dim=0)
     acc = torch.sum(Y == PRED_Y).float() / Y.shape[0]
     re = recall(Y, PRED_Y)
     pr = precision(Y, PRED_Y)
+    num_ano = torch.where(Y == 1)[0].shape[0]
     return {"acc": acc.item(), 
             "recall": re, 
-            "precision": pr}
+            "precision": pr,
+            "num_ano": num_ano}
 
 
 def median_pool(x, kernel_size=3, stride=1, padding=0):

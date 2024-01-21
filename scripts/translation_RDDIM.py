@@ -19,13 +19,7 @@ from guided_diffusion.script_util import (
 
 from data import get_brats_data_iter, check_data
 
-from evaluate import (
-    
-    connected_components_3d,
-    get_stats,
-    median_pool,
-    evaluate
-)
+from evaluate import get_stats, median_pool, evaluate
 from sample import sample
 
 import matplotlib.pyplot as plt
@@ -39,7 +33,14 @@ np.random.seed(0)
 
 
 def get_mask_batch(
-    minibatch_metrics, source, modality, thr_01, abe_min, abe_max, shape, logger=None
+    minibatch_metrics,
+    source,
+    modality,
+    thr_01,
+    abe_min,
+    abe_max,
+    shape,
+    median_filter=True,
 ):
     """
     mse: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
@@ -53,9 +54,10 @@ def get_mask_batch(
     ) ** 2
 
     abe_diff = torch.mean(
-        torch.abs((mse - mse_null)), dim=(3, 4) # batch_size x sample_steps x n_modality
-    )  
-   
+        torch.abs((mse - mse_null)),
+        dim=(3, 4),  # batch_size x sample_steps x n_modality
+    )
+
     mse_flat = torch.mean(mse, dim=(2, 3, 4))  # batch_size x sample_steps
     mse_null_flat = torch.mean(mse_null, dim=(2, 3, 4))
 
@@ -63,7 +65,9 @@ def get_mask_batch(
     batch_map = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(dist_util.dev())
     cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 
-    quant_range = torch.flip(torch.linspace(0.90, 0.99, 101), dims=(0,)).to(dist_util.dev())
+    quant_range = torch.flip(torch.linspace(0.90, 0.98, 101), dims=(0,)).to(
+        dist_util.dev()
+    )
 
     pred_lab = []
     for sample_num in range(abe_diff.shape[0]):
@@ -74,18 +78,18 @@ def get_mask_batch(
         )
 
         # get the quantile threshold for predicted mask
-        # abe_diff_i = torch.mean(abe_diff[sample_num, ...], dim=1) # sample_steps 
-        abe_diff_i = abe_diff[sample_num, ...] # sample_steps x n_modality
-        abe_max_i = abe_diff_i.max(dim=0)[0] # n_modality
-         
-        abe_max_i = torch.clamp((abe_max_i/abe_max), 0, 1)
+        # abe_diff_i = torch.mean(abe_diff[sample_num, ...], dim=1) # sample_steps
+        abe_diff_i = abe_diff[sample_num, ...]  # sample_steps x n_modality
+        abe_max_i = abe_diff_i.max(dim=0)[0]  # n_modality
+
+        abe_max_i = torch.clamp((abe_max_i / abe_max), 0, 1)
         abe_max_i = torch.round(abe_max_i, decimals=2) * 100
-        index = abe_max_i.to(torch.int64) # n_modality
-        quant = quant_range[index] 
+        index = abe_max_i.to(torch.int64)  # n_modality
+        quant = quant_range[index]
 
         # get the steps for predicted mask
         num1 = 0
-        num2 = torch.argmax(abe_diff[sample_num, ...], dim=0) # n_modality
+        num2 = torch.argmax(abe_diff[sample_num, ...], dim=0)  # n_modality
 
         # mask = torch.zeros(1, 1, shape, shape).to(dist_util.dev())
         mapp = torch.zeros(1, 1, shape, shape).to(dist_util.dev())
@@ -106,20 +110,83 @@ def get_mask_batch(
         #     # mask_mod = (F.avg_pool2d(mask_mod.float(), kernel_size=5, stride=1, padding=2) > p)
         #     mask += mask_mod.float()  # union of modalities
         # mask = (mask > 0).float()  # union of modalities
-        
+
         for mod in range(mse.shape[2]):
             mask_mod = torch.mean(
-                    mse[sample_num, num1:num2[mod], [mod],...], axis=[0, 1], keepdim=True
-                )  # 1 x 1 x 128 x 128   
-            thr += torch.quantile(mask_mod.reshape(-1), quant[mod]) 
-            mapp += mask_mod    
-        
+                mse[sample_num, num1 : num2[mod], [mod], ...], axis=[0, 1], keepdim=True
+            )  # 1 x 1 x 128 x 128
+            thr += torch.quantile(mask_mod.reshape(-1), quant[mod])
+            mapp += mask_mod
+
         # collect the predicted mask and map
         mapp /= mse.shape[2]
-        batch_map[sample_num] = mapp 
-        
+        mapp = (
+            median_pool(mapp, kernel_size=5, stride=1, padding=2)
+            if median_filter
+            else mapp
+        )
+        batch_map[sample_num] = mapp
+
         if sim <= thr_01:
-            mask = mapp >= (thr/mse.shape[2])
+            mask = mapp >= (thr / mse.shape[2])
+            batch_mask[sample_num] = mask.float()
+            pred_lab.append(1)
+        else:
+            pred_lab.append(0)
+
+    return batch_mask, torch.tensor(pred_lab), batch_map
+
+
+def get_mask_batch_fixed(
+    minibatch_metrics, source, modality, thr_01, shape, thr, num2, median_filter=True
+):
+    """
+    mse: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
+    mse_null: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
+    """
+    mse = (
+        minibatch_metrics["xstart"] - source[:, modality, ...].unsqueeze(1)
+    ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
+    mse_null = (
+        minibatch_metrics["xstart_null"] - source[:, modality, ...].unsqueeze(1)
+    ) ** 2
+
+    mse_flat = torch.mean(mse, dim=(2, 3, 4))  # batch_size x sample_steps
+    mse_null_flat = torch.mean(mse_null, dim=(2, 3, 4))
+
+    batch_mask = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(dist_util.dev())
+    batch_map = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(dist_util.dev())
+    cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+
+    pred_lab = []
+    for sample_num in range(mse.shape[0]):
+        # get the cosine similarity between mse and mse_null
+        sim = cos(
+            mse_flat[sample_num : sample_num + 1, ...],
+            mse_null_flat[sample_num : sample_num + 1, ...],
+        )
+
+        # get the steps for predicted mask
+        num1 = 0
+        mapp = torch.zeros(1, 1, shape, shape).to(dist_util.dev())
+
+        for mod in range(mse.shape[2]):
+            mask_mod = torch.mean(
+                mse[sample_num, num1 : num2[mod], [mod], ...], axis=[0, 1], keepdim=True
+            )  # 1 x 1 x 128 x 128
+            mapp += mask_mod
+
+        # collect the predicted mask and map
+        mapp /= mse.shape[2]
+        mapp = (
+            median_pool(mapp, kernel_size=5, stride=1, padding=2)
+            if median_filter
+            else mapp
+        )
+        batch_map[sample_num] = mapp
+
+        if sim <= thr_01:
+            mask = mapp >= thr
             batch_mask[sample_num] = mask.float()
             pred_lab.append(1)
         else:
@@ -134,7 +201,7 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     mse_null_flat: N_val x sample_steps x n_modality
     abe_flat: N_val x sample_steps x n_modality
     lab: N_val
-    
+
     get the cosine similarity threshold to differentiate healthy and tumour slices
     get the abe diff range for tumour slices to determine the quantile threshold for predicted mask
     """
@@ -145,8 +212,12 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     mse_1_null_flat = mse_null_flat[torch.where(lab == 1)[0]]
 
     cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
-    output_0 = cos(torch.mean(mse_0_flat, dim=2), torch.mean(mse_0_null_flat, dim=2)) # N_val
-    output_1 = cos(torch.mean(mse_1_flat, dim=2), torch.mean(mse_1_null_flat, dim=2)) # N_val
+    output_0 = cos(
+        torch.mean(mse_0_flat, dim=2), torch.mean(mse_0_null_flat, dim=2)
+    )  # N_val
+    output_1 = cos(
+        torch.mean(mse_1_flat, dim=2), torch.mean(mse_1_null_flat, dim=2)
+    )  # N_val
 
     n_min = 1e6
     for q in np.linspace(0.01, 0.08, 100):
@@ -156,11 +227,13 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
         if n < n_min:
             n_min = n
             thr_01 = torch.quantile(output_0, q)
-          
+
     # print(f"output_0: {output_0.shape}")
-    abe_diff_1 = abe_flat[torch.where(lab == 1)[0]] # N_val_1 x sample_steps x n_modality
+    abe_diff_1 = abe_flat[
+        torch.where(lab == 1)[0]
+    ]  # N_val_1 x sample_steps x n_modality
     # print(f"abe_diff_1: {abe_diff_1.shape}")
-    abe_max = torch.max(abe_diff_1, dim=1)[0] # N_val_1 x n_modality
+    abe_max = torch.max(abe_diff_1, dim=1)[0]  # N_val_1 x n_modality
     print(f"abe_max: {abe_max.shape}")
     return thr_01, abe_max.min(dim=0)[0], abe_max.max(dim=0)[0]
 
@@ -213,13 +286,14 @@ def main():
         find_unused_parameters=False,
     )
 
-    logger.log(f"starting to get threshold and abe range ...")
+    logger.log(f"Validation: starting to get threshold and abe range ...")
 
     MSE = []
     MSE_NULL = []
     ABE_DIFF = []
     LAB = []
 
+    # TODO: make it memory efficient!
     for i in range(args.num_batches_val):
         source_val, _, lab_val = next(data_val)
         source_val = source_val.to(dist_util.dev())
@@ -245,7 +319,7 @@ def main():
     #     # mse_null = torch.mean(mse_null, dim=2, keepdim=True)
 
     #     abe_diff = torch.abs((mse - mse_null)) # batch_size x sample_steps x n_modality x 128 x 128
-        
+
     #     mse_flat = torch.mean(mse, dim=(3,4)) # batch_size x sample_steps x n_modality
     #     mse_null_flat = torch.mean(mse_null, dim=(3,4))
     #     abe_diff_flat = torch.mean(abe_diff, dim=(3,4))
@@ -264,14 +338,21 @@ def main():
     # logger.log(f'abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}')
     # # print(f"MSE: {MSE.shape}, MSE_NULL: {MSE_NULL.shape}, ABE_DIFF: {ABE_DIFF.shape}")
 
-    logger.log(f"starting to evaluate ...")
+    logger.log(f"starting to inference ...")
+
     DICE = []
+    DICE_ANO = []
     IOU = []
+    IOU_ANO = []
     RECALL = []
+    RECALL_ANO = []
     PRECISION = []
+    PRECISION_ANO = []
     AUC = []
+    AUC_ANO = []
     Y = []
     PRED_Y = []
+
     k = 0
     while k < args.num_batches:
         all_sources = []
@@ -305,6 +386,7 @@ def main():
         model_kwargs_reverse = {"threshold": -1, "clf_free": True, "null": args.null}
         model_kwargs0 = {"y": y0, "threshold": -1, "clf_free": True}
 
+        # inference
         minibatch_metrics = diffusion.calc_pred_xstart_loop(
             model,
             source,
@@ -319,7 +401,7 @@ def main():
         #### w = 2
         if args.d_reverse:
             thr_01 = 0.9945
-            abe_min = torch.tensor([0.0021, 0.0014], device=dist_util.dev()) 
+            abe_min = torch.tensor([0.0021, 0.0014], device=dist_util.dev())
             abe_max = torch.tensor([0.143, 0.145], device=dist_util.dev())
         else:
             ## random
@@ -328,50 +410,79 @@ def main():
             abe_max = torch.tensor([0.247, 0.174], device=dist_util.dev())
 
         # collect metrics
-        pred_mask, pred_lab, pred_map = get_mask_batch(
-            minibatch_metrics,
-            source,
-            args.modality,
-            thr_01,
-            abe_min,
-            abe_max,
-            args.image_size,
-            logger=logger,
-        )
+        if not args.tunned:
+            pred_mask, pred_lab, pred_map = get_mask_batch(
+                minibatch_metrics,
+                source,
+                args.modality,
+                thr_01,
+                abe_min,
+                abe_max,
+                args.image_size,
+                median_filter=args.median_filter,
+            )
+        else:
+            thr = torch.tensor([0.11], device=dist_util.dev())
+            num2 = torch.tensor([580, 580], device=dist_util.dev())
+            pred_mask, pred_lab, pred_map = get_mask_batch_fixed(
+                minibatch_metrics,
+                source,
+                args.modality,
+                thr_01,
+                args.image_size,
+                thr,
+                num2,
+                median_filter=args.median_filter,
+            )
         PRED_Y.append(pred_lab)
 
         eval_metrics = evaluate(mask, pred_mask, source, pred_map)
+        eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
         cls_metrics = get_stats(Y, PRED_Y)
-        
+
         DICE.append(eval_metrics["dice"])
+        DICE_ANO.append(eval_metrics_ano["dice"])
         IOU.append(eval_metrics["iou"])
+        IOU_ANO.append(eval_metrics_ano["iou"])
         RECALL.append(eval_metrics["recall"])
+        RECALL_ANO.append(eval_metrics_ano["recall"])
         PRECISION.append(eval_metrics["precision"])
+        PRECISION_ANO.append(eval_metrics_ano["precision"])
         AUC.append(eval_metrics["AUC"])
-        
+        AUC_ANO.append(eval_metrics_ano["AUC"])
+
         logger.log(
             f"-------------------------------------at batch {k}-----------------------------------------"
         )
-        logger.log(f"mean dice: {eval_metrics['dice']}")
-        logger.log(f"mean iou: {eval_metrics['iou']}")
-        logger.log(f"mean precision: {eval_metrics['precision']}")
-        logger.log(f"mean recall: {eval_metrics['recall']}")
-        logger.log(f"mean auc: {eval_metrics['AUC']}")
-        
+        logger.log(f"mean dice: {eval_metrics['dice']:0.3f}")
+        logger.log(f"mean iou: {eval_metrics['iou']:0.3f}")
+        logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
+        logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
+        logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
+
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
-        logger.log(f"running dice: {np.mean(DICE)}")
-        logger.log(f"running iou: {np.mean(IOU)}")
-        logger.log(f"running precision: {np.mean(PRECISION)}")
-        logger.log(f"running recall: {np.mean(RECALL)}")
-        logger.log(f"running auc: {np.mean(AUC)}")
+        logger.log(f"running dice: {np.mean(DICE):0.3f}")  # keep 3 decimals
+        logger.log(f"running iou: {np.mean(IOU):0.3f}")
+        logger.log(f"running precision: {np.mean(PRECISION):0.3f}")
+        logger.log(f"running recall: {np.mean(RECALL):0.3f}")
+        logger.log(f"running auc: {np.mean(AUC):0.3f}")
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
-        logger.log(f"running cls acc: {cls_metrics['acc']}")
-        logger.log(f"running cls recall: {cls_metrics['recall']}")
-        logger.log(f"running cls precision: {cls_metrics['precision']}")
+        logger.log(f"mean dice ano: {eval_metrics_ano['dice']:0.3f}")
+        logger.log(f"mean iou ano: {eval_metrics_ano['iou']:0.3f}")
+        logger.log(f"mean precision ano: {eval_metrics_ano['precision']:0.3f}")
+        logger.log(f"mean recall ano: {eval_metrics_ano['recall']:0.3f}")
+        logger.log(f"mean auc ano: {eval_metrics_ano['AUC']:0.3f}")
+        logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        logger.log(f"running cls acc: {cls_metrics['acc']:0.3f}")
+        logger.log(f"running cls recall: {cls_metrics['recall']:0.3f}")
+        logger.log(f"running cls precision: {cls_metrics['precision']:0.3f}")
+        logger.log(f"running cls num_ano: {cls_metrics['num_ano']}")
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
@@ -429,7 +540,9 @@ def create_argparser():
         save_data=False,
         num_batches_val=2,
         batch_size_val=100,
-        d_reverse=True
+        d_reverse=True,
+        median_filter=True,
+        tunned=False
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
