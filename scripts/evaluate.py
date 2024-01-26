@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
-from sklearn.metrics import auc, roc_curve
+from sklearn.metrics import auc, roc_curve, precision_recall_curve
 import torch.nn.functional as F
 import torchvision
 from torch.nn.modules.utils import _pair, _quadruple
@@ -31,6 +31,9 @@ def evaluate(
         recon_mask = recon_mask[torch.where(label == 1)[0], ...]
         source = source[torch.where(label == 1)[0], ...]
         ano_map = ano_map[torch.where(label == 1)[0], ...]
+        re, pr = PR_AUC(real_mask, ano_map)
+        AUC_score_batch = AUC_score(re, pr)
+        
         
     
     if cc_filter:
@@ -42,6 +45,7 @@ def evaluate(
     recall_batch = recall(real_mask, recon_mask)
     fpr, tpr, _ = ROC_AUC(source, real_mask, ano_map)
     AUC_score_batch = auc(fpr, tpr)
+    
      
     return {
         "dice": dice_batch,
@@ -49,6 +53,7 @@ def evaluate(
         "precision": precision_batch,
         "recall": recall_batch,
         "AUC": AUC_score_batch,
+        "PR_AUC": AUC_score_batch if label is not None else None,
     }
 
 
@@ -91,8 +96,13 @@ def ROC_AUC(source, real_mask, ano_map):
         real_mask.detach().cpu().numpy().flatten(),
         ano_map.detach().cpu().numpy().flatten(),
     )
-
-
+    
+def PR_AUC(real_mask, ano_map):
+    return precision_recall_curve(
+        real_mask.detach().cpu().numpy().flatten(),
+        ano_map.detach().cpu().numpy().flatten(),
+    )
+    
 def AUC_score(fpr, tpr):
     return auc(fpr, tpr)
 

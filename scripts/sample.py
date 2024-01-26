@@ -84,10 +84,9 @@ def main():
     if args.num_classes > 0:
         args.class_cond = True
         
-    args.multi_class = True if args.num_classes > 2 else False
+    
     
     model, diffusion = read_model_and_diffusion(args, args.model_path, args.model_num)
-
     all_samples = []
 
     
@@ -96,8 +95,6 @@ def main():
         logger.log(f"on batch {n}, device: {dist_util.dev()}")
         
         # save samples
-        
-        
         samples, samples_for_each_cls = sample(model, diffusion, num_classes=args.num_classes, 
                                      w=args.w, sample_shape=args.sample_shape, name=args.name)
         
