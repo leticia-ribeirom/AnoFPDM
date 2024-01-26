@@ -3,7 +3,12 @@
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
-from sklearn.metrics import auc, roc_curve, precision_recall_curve
+from sklearn.metrics import (
+    auc,
+    roc_curve,
+    precision_recall_curve,
+    average_precision_score,
+)
 import torch.nn.functional as F
 import torchvision
 from torch.nn.modules.utils import _pair, _quadruple
@@ -31,29 +36,25 @@ def evaluate(
         recon_mask = recon_mask[torch.where(label == 1)[0], ...]
         source = source[torch.where(label == 1)[0], ...]
         ano_map = ano_map[torch.where(label == 1)[0], ...]
-        re, pr = PR_AUC(real_mask, ano_map)
-        AUC_score_batch = AUC_score(re, pr)
-        
-        
-    
+
     if cc_filter:
         recon_mask = connected_components_3d(recon_mask, thr=40)
-    
+
     dice_batch = dice_coeff(real_mask, recon_mask)
     iou_batch = IoU(real_mask, recon_mask)
     precision_batch = precision(real_mask, recon_mask)
     recall_batch = recall(real_mask, recon_mask)
     fpr, tpr, _ = ROC_AUC(source, real_mask, ano_map)
     AUC_score_batch = auc(fpr, tpr)
-    
-     
+    PR_AUC_score_batch = PR_AUC_score(real_mask, ano_map)
+
     return {
         "dice": dice_batch,
         "iou": iou_batch,
         "precision": precision_batch,
         "recall": recall_batch,
         "AUC": AUC_score_batch,
-        "PR_AUC": AUC_score_batch if label is not None else None,
+        "PR_AUC": PR_AUC_score_batch,
     }
 
 
@@ -96,13 +97,15 @@ def ROC_AUC(source, real_mask, ano_map):
         real_mask.detach().cpu().numpy().flatten(),
         ano_map.detach().cpu().numpy().flatten(),
     )
-    
-def PR_AUC(real_mask, ano_map):
-    return precision_recall_curve(
+
+
+def PR_AUC_score(real_mask, ano_map):
+    return average_precision_score(
         real_mask.detach().cpu().numpy().flatten(),
         ano_map.detach().cpu().numpy().flatten(),
     )
-    
+
+
 def AUC_score(fpr, tpr):
     return auc(fpr, tpr)
 
@@ -115,10 +118,7 @@ def get_stats(Y, PRED_Y):
     re = recall(Y, PRED_Y)
     pr = precision(Y, PRED_Y)
     num_ano = torch.where(Y == 1)[0].shape[0]
-    return {"acc": acc.item(), 
-            "recall": re, 
-            "precision": pr,
-            "num_ano": num_ano}
+    return {"acc": acc.item(), "recall": re, "precision": pr, "num_ano": num_ano}
 
 
 def median_pool(x, kernel_size=3, stride=1, padding=0):

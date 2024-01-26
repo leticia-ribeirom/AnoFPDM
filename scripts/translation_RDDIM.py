@@ -250,7 +250,7 @@ def main():
     RECALL = []; RECALL_ANO = []
     PRECISION = []; PRECISION_ANO = []
     AUC = []; AUC_ANO = []
-    PR_AUC_ANO = []
+    PR_AUC = []; PR_AUC_ANO = []
     Y = []; PRED_Y = []
 
     k = 0
@@ -346,6 +346,7 @@ def main():
         AUC.append(eval_metrics["AUC"])
         AUC_ANO.append(eval_metrics_ano["AUC"])
         
+        PR_AUC.append(eval_metrics["PR_AUC"])
         PR_AUC_ANO.append(eval_metrics_ano["PR_AUC"])
 
         logger.log(
@@ -356,6 +357,7 @@ def main():
         logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
         logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
         logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
+        logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
 
         logger.log(
             "-------------------------------------------------------------------------------------------"
@@ -365,6 +367,7 @@ def main():
         logger.log(f"running precision: {np.mean(PRECISION):0.3f}")
         logger.log(f"running recall: {np.mean(RECALL):0.3f}")
         logger.log(f"running auc: {np.mean(AUC):0.3f}")
+        logger.log(f"running pr auc: {np.mean(PR_AUC):0.3f}")
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
