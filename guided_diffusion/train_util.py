@@ -46,7 +46,6 @@ class TrainLoop:
             threshold=-1,
             w=-1,
             num_classes=None,
-            name=None,
             sample_fn=None,
     ):
         self.model = model
@@ -78,7 +77,6 @@ class TrainLoop:
         self.threshold = threshold
         self.w = w
         self.num_classes = num_classes
-        self.name = name
         
         self.sample_fn=sample_fn
         
@@ -267,9 +265,10 @@ class TrainLoop:
                     
                     # save samples
                     for w in self.w:
+                     
                         logger.log(f"sampling with w = {w}...")
                         samples, samples_for_each_cls = self.sample_fn(self.model, self.diffusion, num_classes=self.num_classes, 
-                                                            w=w, sample_shape=self.sample_shape, name=self.name, normalize_img=True)
+                                                            w=w, sample_shape=self.sample_shape, normalize_img=True)
                         
                         if self.sample_shape[1] == 4:
                             samples = samples.reshape(-1, 1, *self.sample_shape[2:])

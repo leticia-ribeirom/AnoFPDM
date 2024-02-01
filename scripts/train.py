@@ -11,6 +11,7 @@ import pathlib
 from guided_diffusion import dist_util, logger
 from data import get_data_iter, check_data
 from guided_diffusion.resample import create_named_schedule_sampler
+
 from guided_diffusion.script_util import (
     model_and_diffusion_defaults,
     create_model_and_diffusion,
@@ -28,7 +29,6 @@ def main():
     logger.configure()
 
     args.w = args.w if isinstance(args.w, list) else [args.w]
-
     args.num_classes = int(args.num_classes) if int(args.num_classes) > 0 else None
 
     logger.log(f"args: {args}")
@@ -36,7 +36,9 @@ def main():
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
-
+    if args.w[0] == -1:
+        model.LABEL_EMB_VER = "v2"
+        
     # get model size
     model_size = 0
     for param in model.parameters():
@@ -100,7 +102,6 @@ def main():
         threshold=args.threshold,
         w=args.w,
         num_classes=args.num_classes,
-        name=args.name,
         sample_fn=sample,
     ).run_loop()
 
@@ -128,6 +129,7 @@ def create_argparser():
         fp16_scale_growth=1e-3,
         n_tumour_patients=None,
         n_healthy_patients=None,
+        unet_ver="v2",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

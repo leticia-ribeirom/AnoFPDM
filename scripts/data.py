@@ -107,7 +107,7 @@ class BrainDataset(torch.utils.data.Dataset):
     def __init__(self, datapath, split="val", n_tumour_patients=None, n_healthy_patients=None,
                  skip_healthy_s_in_tumour=False,  # whether to skip healthy slices in "tumour" patients
                  skip_tumour_s_in_healthy=False,  # whether to skip tumour slices in healthy patients
-                 mixed=False, ret_lab=False, seed=0):
+                 mixed=False, ret_lab=False, seed=0, num_mix=None):
 
         self.rng = random.Random(seed)
 
@@ -153,12 +153,12 @@ class BrainDataset(torch.utils.data.Dataset):
         self.rng.shuffle(patient_dirs)
 
         
-
+        num_mix = len(patient_dirs) if num_mix is None else num_mix
         # Patients with tumours
         if mixed:
             self.patient_datasets = [PatientDataset(patient_dirs[i], process_fun=process, id=i,
                                                     skip_condition=None)
-                                                    for i in range(len(patient_dirs))]
+                                                    for i in range(num_mix)]
         else:
             assert ((n_tumour_patients is not None) or (n_healthy_patients is not None))
             self.n_tumour_patients = n_tumour_patients if n_tumour_patients is not None else len(patient_dirs)
@@ -194,7 +194,7 @@ class BrainDataset(torch.utils.data.Dataset):
 #%% load brats
 def load_brats(data_dir, split, 
                n_healthy_patients=None, n_tumour_patients=None, 
-               mixed=False, ret_lab=False):
+               mixed=False, ret_lab=False, num_mix=None):
     
     assert split in ["train", "val", "test"]
 
@@ -209,7 +209,7 @@ def load_brats(data_dir, split,
                             data_dir, split=split, 
                             n_tumour_patients=n_tumour_patients,
                             n_healthy_patients=n_healthy_patients,
-                            mixed=mixed, ret_lab=ret_lab)
+                            mixed=mixed, ret_lab=ret_lab, num_mix=num_mix)
 
                           
 #%% 
@@ -218,21 +218,20 @@ def get_brats_data_iter(data_dir, batch_size,
                         logger=None, training=True,
                         n_healthy_patients=None, 
                         n_tumour_patients=None,
-                        mixed=False):
+                        mixed=False,
+                        num_mix=None):
 
     data = load_brats(data_dir, split, 
                       n_healthy_patients, 
                       n_tumour_patients,
                       mixed=mixed, 
-                      ret_lab=ret_lab)
+                      ret_lab=ret_lab,
+                      num_mix=num_mix)
     
     
     
     if split == 'val':
-        if split == 'train':
-            labels = [data[i][1]['y'] for i in range(len(data))]
-        elif split == 'val':
-            labels = [data[i][2] for i in range(len(data))]
+        labels = [data[i][2] for i in range(len(data))]
         
         class_sample_count = np.array(
             [len(np.where(labels == t)[0]) for t in np.unique(labels)])
@@ -241,7 +240,7 @@ def get_brats_data_iter(data_dir, batch_size,
         samples_weight = np.array([weight[t] for t in labels])
         samples_weight = torch.from_numpy(samples_weight)
         samples_weight = samples_weight.double()
-        replacement = True if split == 'train' else False
+        replacement = True 
         sampler = WeightedRandomSampler(samples_weight, len(samples_weight), 
                                         replacement=replacement)
 
@@ -276,10 +275,12 @@ def check_data(loader, image_dir, split='train', name='cifar10'):
     if samples.shape[1] == 4:
         samples_for_each_cls = samples.shape[1]
         samples = samples.reshape(-1, 1, *samples.shape[2:])[:64]
-        
-    samples = (samples + 1) / 2
+        samples = (samples + 1) / 2
         
     images = make_grid(samples, nrow=samples_for_each_cls)
+    
+    os.makedirs(image_dir, exist_ok=True)
+    
     save_image(images, os.path.join(image_dir, 'real_{}.png'.format(split)))
 
 def get_data_iter(name, data_dir, batch_size, 

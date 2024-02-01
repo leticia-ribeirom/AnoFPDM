@@ -11,3 +11,5 @@ test*
 /slurm_out/
 /kl_test/
 /scripts/translation_DDIB.py
+/scripts/train_classifier.py
+/scripts/translation_CLF.py

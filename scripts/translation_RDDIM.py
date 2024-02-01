@@ -173,31 +173,28 @@ def get_mask_batch_tuned(
     return batch_mask, torch.tensor(pred_lab), batch_map
 
 
-
 def main():
     args = create_argparser().parse_args()
 
     dist_util.setup_dist()
     logger.configure()
     logger.log(f"args: {args}")
-    
+
     # set seed for reproducibility, we use 0 in paper
     torch.random.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    logger.log("starting to evaluate...")
-    
-    image_subfolder = args.image_dir
-    pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
+    # image_subfolder = args.image_dir
+    # pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
 
     logger.log(f"reading models ...")
     args.num_classes = int(args.num_classes) if args.num_classes else None
-    if args.num_classes > 0:
+    if args.num_classes:
         args.class_cond = True
     args.multi_class = True if args.num_classes > 2 else False
 
     model, diffusion = read_model_and_diffusion(
-        args, args.source_dir, args.model_num, args.ema
+        args, args.model_dir, args.model_num, args.ema
     )
 
     data_val = get_brats_data_iter(
@@ -230,28 +227,35 @@ def main():
     logger.log(f"Validation: starting to get threshold and abe range ...")
     if not args.tuned:
         thr_01, abe_min, abe_max = obtain_hyperpara(data_val, diffusion, model, args, dist_util.dev())
-        logger.log(f'abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}')
-        # #### w = 2
+
+        #### w = 2
         # if args.d_reverse:
-        #     thr_01 = 0.9945
+        #     thr_01 = 0.9947
         #     abe_min = torch.tensor([0.0021, 0.0014], device=dist_util.dev())
-        #     abe_max = torch.tensor([0.143, 0.145], device=dist_util.dev())
+        #     abe_max = torch.tensor([0.1927, 0.1464], device=dist_util.dev())
         # else:
         #     ## random
         #     thr_01 = 0.9840
         #     abe_min = torch.tensor([0.0023, 0.0018], device=dist_util.dev())
         #     abe_max = torch.tensor([0.247, 0.174], device=dist_util.dev())
-        
-    
+        logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+
     logger.log(f"starting to inference ...")
 
-    DICE = []; DICE_ANO = []
-    IOU = []; IOU_ANO = []
-    RECALL = []; RECALL_ANO = []
-    PRECISION = []; PRECISION_ANO = []
-    AUC = []; AUC_ANO = []
-    PR_AUC = []; PR_AUC_ANO = []
-    Y = []; PRED_Y = []
+    DICE = []
+    DICE_ANO = []
+    IOU = []
+    IOU_ANO = []
+    RECALL = []
+    RECALL_ANO = []
+    PRECISION = []
+    PRECISION_ANO = []
+    AUC = []
+    AUC_ANO = []
+    PR_AUC = []
+    PR_AUC_ANO = []
+    Y = []
+    PRED_Y = []
 
     k = 0
     while k < args.num_batches:
@@ -296,9 +300,8 @@ def main():
             sample_steps=args.rev_steps,
             model_kwargs=model_kwargs0,
             model_kwargs_reverse=model_kwargs_reverse,
+            dynamic_clip=args.dynamic_clip,
         )
-
-        
 
         # collect metrics
         if not args.tuned:
@@ -333,19 +336,19 @@ def main():
 
         DICE.append(eval_metrics["dice"])
         DICE_ANO.append(eval_metrics_ano["dice"])
-        
+
         IOU.append(eval_metrics["iou"])
         IOU_ANO.append(eval_metrics_ano["iou"])
-        
+
         RECALL.append(eval_metrics["recall"])
         RECALL_ANO.append(eval_metrics_ano["recall"])
-        
+
         PRECISION.append(eval_metrics["precision"])
         PRECISION_ANO.append(eval_metrics_ano["precision"])
-        
+
         AUC.append(eval_metrics["AUC"])
         AUC_ANO.append(eval_metrics_ano["AUC"])
-        
+
         PR_AUC.append(eval_metrics["PR_AUC"])
         PR_AUC_ANO.append(eval_metrics_ano["PR_AUC"])
 
@@ -431,7 +434,7 @@ def create_argparser():
     defaults = dict(
         data_dir="",
         image_dir="",
-        source_dir="",
+        model_dir="",
         batch_size=32,
         rev_steps=600,
         model_num=None,
@@ -442,8 +445,9 @@ def create_argparser():
         batch_size_val=100,
         d_reverse=True,
         median_filter=True,
+        dynamic_clip=False,
         tuned=False,
-        seed=0, # reproduce
+        seed=0,  # reproduce
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

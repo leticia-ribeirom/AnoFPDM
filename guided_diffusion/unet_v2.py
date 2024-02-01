@@ -372,7 +372,8 @@ class UNetModel(nn.Module):
         num_heads_upsample=-1,
         use_scale_shift_norm=False,
         resblock_updown=False,
-        use_new_attention_order=False
+        use_new_attention_order=False,
+        clf_free=True,
     ):
         super().__init__()
 
@@ -406,14 +407,15 @@ class UNetModel(nn.Module):
         
         
 
-        if self.num_classes is not None:
+        if self.num_classes is not None and clf_free:
             self.label_emb = nn.Embedding(self.num_classes, model_channels)
-            
             self.class_emb = nn.Sequential(
                 linear(model_channels, time_embed_dim),
                 nn.SiLU(),
                 linear(time_embed_dim, time_embed_dim),
-             )
+            )
+        elif self.num_classes is not None and not clf_free:
+            self.label_emb = nn.Embedding(self.num_classes, time_embed_dim)
             
         
 
@@ -588,6 +590,7 @@ class UNetModel(nn.Module):
         '''
         For clf-free training, set threshold > 0
         For clf-free sampling, set threshold = -1, and clf_free = True
+        For clf training, set threshold = -1, and clf_free = False
         '''
         if self.num_classes is not None:
             # assert y.shape == (x.shape[0],)
@@ -676,7 +679,8 @@ class EncoderUNetModel(nn.Module):
         self.num_heads_upsample = num_heads_upsample
 
         time_embed_dim = model_channels * 4
-        encoder_channels = time_embed_dim
+        # encoder_channels = time_embed_dim
+        encoder_channels = None
 
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),

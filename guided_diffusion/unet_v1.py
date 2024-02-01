@@ -23,15 +23,15 @@ class AttentionPool2d(nn.Module):
     """
 
     def __init__(
-            self,
-            spacial_dim: int,
-            embed_dim: int,
-            num_heads_channels: int,
-            output_dim: int = None,
+        self,
+        spacial_dim: int,
+        embed_dim: int,
+        num_heads_channels: int,
+        output_dim: int = None,
     ):
         super().__init__()
         self.positional_embedding = nn.Parameter(
-            th.randn(embed_dim, spacial_dim ** 2 + 1) / embed_dim ** 0.5
+            th.randn(embed_dim, spacial_dim**2 + 1) / embed_dim**0.5
         )
         self.qkv_proj = conv_nd(1, embed_dim, 3 * embed_dim, 1)
         self.c_proj = conv_nd(1, embed_dim, output_dim or embed_dim, 1)
@@ -156,17 +156,17 @@ class ResBlock(TimestepBlock):
     """
 
     def __init__(
-            self,
-            channels,
-            emb_channels,
-            dropout,
-            out_channels=None,
-            use_conv=False,
-            use_scale_shift_norm=False,
-            dims=2,
-            use_checkpoint=False,
-            up=False,
-            down=False,
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        out_channels=None,
+        use_conv=False,
+        use_scale_shift_norm=False,
+        dims=2,
+        use_checkpoint=False,
+        up=False,
+        down=False,
     ):
         super().__init__()
         self.channels = channels
@@ -263,12 +263,12 @@ class AttentionBlock(nn.Module):
     """
 
     def __init__(
-            self,
-            channels,
-            num_heads=1,
-            num_head_channels=-1,
-            use_checkpoint=False,
-            use_new_attention_order=False,
+        self,
+        channels,
+        num_heads=1,
+        num_head_channels=-1,
+        use_checkpoint=False,
+        use_new_attention_order=False,
     ):
         super().__init__()
         self.channels = channels
@@ -276,7 +276,7 @@ class AttentionBlock(nn.Module):
             self.num_heads = num_heads
         else:
             assert (
-                    channels % num_head_channels == 0
+                channels % num_head_channels == 0
             ), f"q,k,v channels {channels} is not divisible by num_head_channels {num_head_channels}"
             self.num_heads = channels // num_head_channels
         self.use_checkpoint = use_checkpoint
@@ -319,7 +319,7 @@ def count_flops_attn(model, _x, y):
     # We perform two matmuls with the same number of ops.
     # The first computes the weight matrix, the second computes
     # the combination of the value vectors.
-    matmul_ops = 2 * b * (num_spatial ** 2) * c
+    matmul_ops = 2 * b * (num_spatial**2) * c
     model.total_ops += th.DoubleTensor([matmul_ops])
 
 
@@ -376,7 +376,7 @@ class QKVAttention(nn.Module):
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
         q, k, v = qkv.chunk(3, dim=1)
-        
+
         scale = 1 / math.sqrt(math.sqrt(ch))
         weight = th.einsum(
             "bct,bcs->bts",
@@ -424,26 +424,27 @@ class UNetModel(nn.Module):
     """
 
     def __init__(
-            self,
-            image_size,
-            in_channels,
-            model_channels,
-            out_channels,
-            num_res_blocks,
-            attention_resolutions,
-            dropout=0,
-            channel_mult=(1, 2, 4, 8),
-            conv_resample=True,
-            dims=2,
-            num_classes=None,
-            use_checkpoint=False,
-            use_fp16=False,
-            num_heads=1,
-            num_head_channels=-1,
-            num_heads_upsample=-1,
-            use_scale_shift_norm=False,
-            resblock_updown=False,
-            use_new_attention_order=False,
+        self,
+        image_size,
+        in_channels,
+        model_channels,
+        out_channels,
+        num_res_blocks,
+        attention_resolutions,
+        dropout=0,
+        channel_mult=(1, 2, 4, 8),
+        conv_resample=True,
+        dims=2,
+        num_classes=None,
+        use_checkpoint=False,
+        use_fp16=False,
+        num_heads=1,
+        num_head_channels=-1,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=False,
+        resblock_updown=False,
+        use_new_attention_order=False,
+        clf_free=True,
     ):
         super().__init__()
 
@@ -465,7 +466,7 @@ class UNetModel(nn.Module):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
-        
+
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),
@@ -473,15 +474,17 @@ class UNetModel(nn.Module):
             linear(time_embed_dim, time_embed_dim),
         )
 
-        
-        if self.num_classes is not None:
+       
+        if self.num_classes is not None and clf_free:
             self.label_emb = nn.Embedding(self.num_classes, model_channels)
             self.class_emb = nn.Sequential(
                 linear(model_channels, time_embed_dim),
                 nn.SiLU(),
                 linear(time_embed_dim, time_embed_dim),
-             )
-            
+            )
+        elif self.num_classes is not None and not clf_free:
+            self.label_emb = nn.Embedding(self.num_classes, time_embed_dim)
+
 
         ch = input_ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList(
@@ -650,44 +653,44 @@ class UNetModel(nn.Module):
         :param null: a bool indicating if the null embedding should be used in sampling
         :return: an [N x C x ...] Tensor of outputs.
         """
-       
+
         assert (y is not None) == (
-                self.num_classes is not None
+            self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-        #-------------------------------- Condition Setup --------------------------
-        '''
+        # -------------------------------- Condition Setup --------------------------
+        """
         For clf-free training, set threshold > 0
         For clf-free sampling, set threshold = -1, and clf_free = True
         For non clf-free sampling, e.g., classifier guided, set threshold = -1, and clf_free = False
-        '''
+        """
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             cemb = None
-            
-            if threshold != -1: # for clf-free training
+
+            if threshold != -1:  # for clf-free training
                 assert threshold > 0
                 cemb = self.class_emb(self.label_emb(y))
-                mask = th.rand(cemb.shape[0])<threshold
+                mask = th.rand(cemb.shape[0]) < threshold
                 cemb[np.where(mask)[0]] = 0
-               
-            elif threshold == -1 and clf_free: # for clf-free sampling
-                if null: # null embedding
+
+            elif threshold == -1 and clf_free:  # for clf-free sampling
+                if null:  # null embedding
                     cemb = th.zeros_like(emb)
-                else: # class condition embedding
-                    cemb = self.class_emb(self.label_emb(y)) 
-                
+                else:  # class condition embedding
+                    cemb = self.class_emb(self.label_emb(y))
+
             # for non-clf-free condition embedding, e.g., classifier guided sampling
             elif threshold == -1 and not clf_free:
-                cemb = self.label_emb(y)    
-            
+                cemb = self.label_emb(y)
+
             assert cemb is not None
-            emb = emb + cemb   
-        #-------------------------------- Condition Setup --------------------------     
-                    
+            emb = emb + cemb
+        # -------------------------------- Condition Setup --------------------------
+
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb)
@@ -725,26 +728,26 @@ class EncoderUNetModel(nn.Module):
     """
 
     def __init__(
-            self,
-            image_size,
-            in_channels,
-            model_channels,
-            out_channels,
-            num_res_blocks,
-            attention_resolutions,
-            dropout=0,
-            channel_mult=(1, 2, 4, 8),
-            conv_resample=True,
-            dims=2,
-            use_checkpoint=False,
-            use_fp16=False,
-            num_heads=1,
-            num_head_channels=-1,
-            num_heads_upsample=-1,
-            use_scale_shift_norm=False,
-            resblock_updown=False,
-            use_new_attention_order=False,
-            pool="adaptive",
+        self,
+        image_size,
+        in_channels,
+        model_channels,
+        out_channels,
+        num_res_blocks,
+        attention_resolutions,
+        dropout=0,
+        channel_mult=(1, 2, 4, 8),
+        conv_resample=True,
+        dims=2,
+        use_checkpoint=False,
+        use_fp16=False,
+        num_heads=1,
+        num_head_channels=-1,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=False,
+        resblock_updown=False,
+        use_new_attention_order=False,
+        pool="adaptive",
     ):
         super().__init__()
 
@@ -771,7 +774,6 @@ class EncoderUNetModel(nn.Module):
             nn.SiLU(),
             linear(time_embed_dim, time_embed_dim),
         )
-        
 
         ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList(
@@ -930,5 +932,3 @@ class EncoderUNetModel(nn.Module):
         else:
             h = h.type(x.dtype)
             return self.out(h)
-
-
