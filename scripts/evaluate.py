@@ -121,12 +121,12 @@ def get_stats(Y, PRED_Y):
     return {"acc": acc.item(), "recall": re, "precision": pr, "num_ano": num_ano}
 
 
-def median_pool(x, kernel_size=3, stride=1, padding=0):
+def median_pool(ano_map, kernel_size=5, stride=1, padding=2):
+    # ano_map: [b, 1, h, w]; source: [b, n_mod, h, w]
     k = _pair(kernel_size)
     stride = _pair(stride)
     padding = _quadruple(padding)
-
-    x = F.pad(x, padding, mode="reflect")
+    x = F.pad(ano_map, padding, mode="reflect")
     x = x.unfold(2, k[0], stride[0]).unfold(3, k[1], stride[1])
     x = x.contiguous().view(x.size()[:4] + (-1,)).median(dim=-1)[0]
     return x
