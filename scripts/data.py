@@ -145,8 +145,7 @@ class BrainDataset(torch.utils.data.Dataset):
                 x_tensor = (x_tensor - x_min[:, None, None]) / (x_max[:, None, None] - x_min[:, None, None] + 0.00001) # [0, 1]
                 
             
-            x_tensor = x_tensor*2 - 1 
-            # x_tensor = torch.clamp(x_tensor, -1, 1)# [-1, 1]
+            x_tensor = x_tensor*2 - 1 # [-1, 1]
             return x_tensor, y_tensor, lab
 
         patient_dirs = sorted(list(path.iterdir()))

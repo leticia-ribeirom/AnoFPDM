@@ -20,7 +20,7 @@ def normalise_percentile(volume):
         v_ = v_[v_ > 0]  # Use only the brain foreground to calculate the quantile
         p_99 = torch.quantile(v_, 0.99)
         volume[:, mdl, :, :] /= p_99
-
+        # volume[:, mdl, :, :] /= volume[:, mdl, :, :].max() # Normalise to [0, 1]
     return volume
 
 
@@ -65,6 +65,7 @@ def process_patient(path, target_path, mod, pre=-1, post=-1, downsample=True):
     patient_dir.mkdir(parents=True, exist_ok=True)
 
     volume = normalise_percentile(volume)
+    # volume /= volume.max()
 
     sum_dim2 = (volume[0].mean(dim=0).sum(axis=0).sum(axis=0) > 0.5).int()
     fs_dim2 = sum_dim2.argmax()
@@ -86,7 +87,8 @@ def preprocess(datapath: Path, mod: str, pre=-1, post=-1):
 
     all_imgs = sorted(list((datapath).iterdir()))
 
-    splits_path = datapath.parent / f"preprocessed_data_{mod}_{pre}{post}" / "data_splits"
+    sub_dir = f"preprocessed_data_{mod}_{pre}{post}_01_each_128"
+    splits_path = datapath.parent / sub_dir / "data_splits"
 
     if not splits_path.exists():
 
@@ -94,7 +96,7 @@ def preprocess(datapath: Path, mod: str, pre=-1, post=-1):
         random.seed(10)
         random.shuffle(indices)
 
-        n_train = int(len(indices) * 0.80)
+        n_train = int(len(indices) * 0.75)
         n_val = int(len(indices) * 0.05)
         n_test = len(indices) - n_train - n_val
 
@@ -114,8 +116,8 @@ def preprocess(datapath: Path, mod: str, pre=-1, post=-1):
         print(f"Patients in {split}]: {len(paths)}")
 
         for source_path in tqdm(paths):
-            target_path = datapath.parent / f"preprocessed_data_{mod}_{pre}{post}" / f"npy_{split}"
-            process_patient(source_path, target_path, mod, pre, post, downsample=False)
+            target_path = datapath.parent / sub_dir / f"npy_{split}"
+            process_patient(source_path, target_path, mod, pre, post, downsample=True)
 
 
 if __name__ == "__main__":
@@ -124,16 +126,15 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
-    parser.add_argument("-m", "--mod", default='flair', type=str, help="modelity to preprocess")
+    parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
     
-    parser.add_argument("--pre", default=-1, 
+    parser.add_argument("--pre", default=0, 
                         type=int, help="skip first n slices")
-    parser.add_argument("--post", default=-1,
+    parser.add_argument("--post", default=0,
                         type=int, help="skip last n slices")
     
     args = parser.parse_args()
 
     datapath = Path(args.source)
-    mod = args.mod
-
-    preprocess(datapath, mod, args.pre, args.post)
+   
+    preprocess(datapath, args.mod, args.pre, args.post)

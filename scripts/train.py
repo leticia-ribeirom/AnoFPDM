@@ -36,8 +36,7 @@ def main():
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
-    if args.w[0] == -1:
-        model.LABEL_EMB_VER = "v2"
+    
         
     # get model size
     model_size = 0
