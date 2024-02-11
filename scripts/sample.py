@@ -36,6 +36,8 @@ def sample(
     reverse=False,
     normalize_img=True,
     null=False,
+    ddpm=False,
+    noise_fn=None,
 ):
     samples_for_each_cls = 8  # default
     clf_free = False if w == -1 else True
@@ -52,29 +54,42 @@ def sample(
     else:
         model_kwargs = {}
 
-    if not reverse:
-        samples = diffusion.ddim_sample_loop(
+    if not ddpm:
+        if not reverse:
+            samples = diffusion.ddim_sample_loop(
+                model,
+                sample_shape,
+                noise=noise,
+                cond_fn=cond_fn,
+                clip_denoised=clip_denoised,
+                w=w,
+                denoised_fn=clamp_to_spatial_quantile if dynamic_clip else None,
+                sample_steps=sample_steps,
+                model_kwargs=model_kwargs,
+                device=dist_util.dev(),
+            )
+
+        else:
+            if null:
+                model_kwargs = {"threshold": -1, "clf_free": True, "null": True}
+            samples = diffusion.ddim_reverse_sample_loop(
+                model,
+                image=noise,
+                clip_denoised=clip_denoised,
+                denoised_fn=clamp_to_spatial_quantile if dynamic_clip else None,
+                sample_steps=sample_steps,
+                model_kwargs=model_kwargs,
+                device=dist_util.dev(),
+            )
+    else:
+        samples = diffusion.p_sample_loop(
             model,
             sample_shape,
             noise=noise,
             cond_fn=cond_fn,
             clip_denoised=clip_denoised,
-            w=w,
+            noise_fn=noise_fn,
             denoised_fn=clamp_to_spatial_quantile if dynamic_clip else None,
-            sample_steps=sample_steps,
-            model_kwargs=model_kwargs,
-            device=dist_util.dev(),
-        )
-
-    else:
-        if null:
-            model_kwargs = {"threshold": -1, "clf_free": True, "null": True}
-        samples = diffusion.ddim_reverse_sample_loop(
-            model,
-            image=noise,
-            clip_denoised=clip_denoised,
-            denoised_fn=clamp_to_spatial_quantile if dynamic_clip else None,
-            sample_steps=sample_steps,
             model_kwargs=model_kwargs,
             device=dist_util.dev(),
         )

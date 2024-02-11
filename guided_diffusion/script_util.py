@@ -62,7 +62,7 @@ def model_and_diffusion_defaults():
         use_fp16=False,
         use_new_attention_order=False,
         in_channels=3,
-        num_classes=None,
+        num_classes=2,
         unet_ver="v2",
         clf_free=True,
     )
@@ -150,7 +150,7 @@ def create_model(
     class_cond=False,
     use_checkpoint=False,
     attention_resolutions="16",
-    num_classes=1000,
+    num_classes=2,
     num_heads=1,
     num_head_channels=-1,
     num_heads_upsample=-1,

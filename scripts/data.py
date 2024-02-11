@@ -106,7 +106,7 @@ class BrainDataset(torch.utils.data.Dataset):
 
     def __init__(self, datapath, split="val", n_tumour_patients=None, n_healthy_patients=None,
                  skip_healthy_s_in_tumour=False,  # whether to skip healthy slices in "tumour" patients
-                 skip_tumour_s_in_healthy=False,  # whether to skip tumour slices in healthy patients
+                 skip_tumour_s_in_healthy=True,  # whether to skip tumour slices in healthy patients
                  mixed=False, ret_lab=False, seed=0, num_mix=None):
 
         self.rng = random.Random(seed)
@@ -152,9 +152,9 @@ class BrainDataset(torch.utils.data.Dataset):
         self.rng.shuffle(patient_dirs)
 
         
-        num_mix = len(patient_dirs) if num_mix is None else num_mix
         # Patients with tumours
         if mixed:
+            num_mix = len(patient_dirs) if num_mix is None else num_mix
             self.patient_datasets = [PatientDataset(patient_dirs[i], process_fun=process, id=i,
                                                     skip_condition=None)
                                                     for i in range(num_mix)]

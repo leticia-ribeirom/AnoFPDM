@@ -209,8 +209,9 @@ class GaussianDiffusion:
         :param noise: if specified, the split-out normal noise.
         :return: A noisy version of x_start.
         """
-        if noise is None:
-            noise = th.randn_like(x_start)
+        
+        # NOTE: you can use noise_fn to pass in a custom noise function, e.g., simplex noise from AnoDDPM
+        noise = th.randn_like(x_start) if noise is None else noise
 
         assert noise.shape == x_start.shape
         return (
@@ -465,6 +466,7 @@ class GaussianDiffusion:
         clip_denoised=True,
         denoised_fn=None,
         cond_fn=None,
+        noise_fn=None,
         model_kwargs=None,
     ):
         """
@@ -492,7 +494,7 @@ class GaussianDiffusion:
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
-        noise = th.randn_like(x)
+        noise = th.randn_like(x) if noise_fn is None else noise_fn(x, t)
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
@@ -508,6 +510,7 @@ class GaussianDiffusion:
         model,
         shape,
         noise=None,
+        noise_fn=None,
         clip_denoised=True,
         denoised_fn=None,
         cond_fn=None,
@@ -539,6 +542,7 @@ class GaussianDiffusion:
             model,
             shape,
             noise=noise,
+            noise_fn=noise_fn,
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
             cond_fn=cond_fn,
@@ -554,6 +558,7 @@ class GaussianDiffusion:
         model,
         shape,
         noise=None,
+        noise_fn=None,
         clip_denoised=True,
         denoised_fn=None,
         cond_fn=None,
@@ -572,10 +577,17 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
+        
+                
         if noise is not None:
             img = noise
         else:
+            
             img = th.randn(*shape, device=device)
+            if noise_fn is not None:
+                t = th.tensor([self.num_timesteps - 1] * shape[0], device=device)
+                img = noise_fn(img, t)
+                
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -591,6 +603,7 @@ class GaussianDiffusion:
                     model,
                     img,
                     t,
+                    noise_fn=noise_fn,
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
@@ -654,7 +667,7 @@ class GaussianDiffusion:
         if noise_fn is None:
             noise = th.randn_like(x)
         else:
-            noise = noise_fn(x)
+            noise = noise_fn(x, t)
 
         mean_pred = (
             out["pred_xstart"] * th.sqrt(alpha_bar_prev)
@@ -665,22 +678,6 @@ class GaussianDiffusion:
         )  # no noise when t == 0
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
-
-    def q_posterior_mean_variance_ddim(self, x_start, x_t, t):
-        """
-        Compute the mean and variance of the diffusion posterior:
-
-            q(x_{t-1} | x_t, x_0)
-
-        """
-        assert x_start.shape == x_t.shape
-
-        alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x_t.shape)
-        eps = self._predict_eps_from_xstart(x_t, t, x_start)
-        posterior_mean = (
-            x_start * th.sqrt(alpha_bar_prev) + th.sqrt(1 - alpha_bar_prev) * eps
-        )
-        return posterior_mean
 
     def ddim_sample_loop(
         self,
@@ -748,23 +745,29 @@ class GaussianDiffusion:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
 
-        if shape[1] == 4:
-            img = th.cat(
-                [
-                    th.randn(shape[0], 1, *shape[2:], device=device)
-                    for _ in range(shape[1])
-                ],
-                dim=1,
-            )
+        # if noise is not None:
+        #     img = noise
+        # else:
+        #     if shape[1] == 4:
+        #         img = th.cat(
+        #             [
+        #                 th.randn(shape[0], 1, *shape[2:], device=device)
+        #                 for _ in range(shape[1])
+        #             ],
+        #             dim=1,
+        #         )
+        #     else:
+        #         img = th.randn(*shape, device=device)
+        #     if noise_fn is not None:
+        #         img = noise_fn(img, t)
+        
+        if noise is not None:
+            img = noise
         else:
             img = th.randn(*shape, device=device)
-
-        img = noise if noise is not None else img
-
-        if noise_fn is not None:
-            t = th.tensor([self.num_timesteps - 1] * img.shape[0], device=device)
-            noise = noise_fn(img)
-            img = self.q_sample(th.zeros_like(noise), t, noise=noise)
+            if noise_fn is not None:
+                t = th.tensor([self.num_timesteps - 1] * shape[0], device=device)
+                img = noise_fn(img, t)
 
         if sample_steps is None:
             indices = list(range(self.num_timesteps))[::-1]
@@ -937,11 +940,10 @@ class GaussianDiffusion:
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
-        if model_kwargs is None:
+        if 'y' not in model_kwargs.keys():
             model_kwargs = {}
 
-        noise = th.randn_like(x_start) if noise_fn is None else noise_fn(x_start)
-
+        noise = th.randn_like(x_start) if noise_fn is None else noise_fn(x_start, t)
         x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}

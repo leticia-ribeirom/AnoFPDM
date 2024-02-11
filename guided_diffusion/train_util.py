@@ -45,6 +45,7 @@ class TrainLoop:
             img_dir=None,
             threshold=-1,
             w=-1,
+            noise_fn=None,
             num_classes=None,
             sample_fn=None,
     ):
@@ -79,7 +80,7 @@ class TrainLoop:
         self.num_classes = num_classes
         
         self.sample_fn=sample_fn
-        
+        self.noise_fn=noise_fn
         self.sync_cuda = th.cuda.is_available()
 
         self._load_and_sync_parameters()
@@ -220,6 +221,7 @@ class TrainLoop:
                 micro,
                 t,
                 model_kwargs=micro_cond,
+                noise_fn=self.noise_fn,
             )
 
             if last_batch or not self.use_ddp:
@@ -267,8 +269,12 @@ class TrainLoop:
                     for w in self.w:
                      
                         logger.log(f"sampling with w = {w}...")
-                        samples, samples_for_each_cls = self.sample_fn(self.model, self.diffusion, num_classes=self.num_classes, 
-                                                            w=w, sample_shape=self.sample_shape, normalize_img=True)
+                        samples, samples_for_each_cls = self.sample_fn(self.model, self.diffusion, 
+                                                                       num_classes=self.num_classes, 
+                                                                         w=w, sample_shape=self.sample_shape, 
+                                                                         normalize_img=True,
+                                                                         noise_fn=self.noise_fn,
+                                                                         ddpm=True if self.noise_fn else False)
                         
                         if self.sample_shape[1] == 4:
                             samples = samples.reshape(-1, 1, *self.sample_shape[2:])

@@ -1,6 +1,7 @@
 """
 Train a diffusion model on images.
 """
+
 import sys
 import os
 
@@ -29,15 +30,17 @@ def main():
     logger.configure()
 
     args.w = args.w if isinstance(args.w, list) else [args.w]
+
     args.num_classes = int(args.num_classes) if int(args.num_classes) > 0 else None
+    if args.num_classes:
+        args.class_cond = True
 
     logger.log(f"args: {args}")
 
     model, diffusion = create_model_and_diffusion(
         **args_to_dict(args, model_and_diffusion_defaults().keys())
     )
-    
-        
+
     # get model size
     model_size = 0
     for param in model.parameters():
@@ -50,16 +53,40 @@ def main():
 
     schedule_sampler = create_named_schedule_sampler(args.schedule_sampler, diffusion)
 
+    if args.noise_type == "simplex":
+        from noise import generate_simplex_noise
+        from simplex import Simplex_CLASS
+
+        simplex = Simplex_CLASS()
+        noise_fn = lambda x, t: generate_simplex_noise(
+            simplex,
+            x,
+            t,
+            False,
+            in_channels=args.in_channels,
+            octave=6,
+            persistence=0.8,
+            frequency=64,
+        )
+    elif args.noise_type == "gaussian":
+        noise_fn = None
+    else:
+        raise ValueError(f"Unknown noise type: {args.noise_type}")
+
     logger.log("creating data loader...")
 
     if args.name.lower() == "brats":
         kwargs = dict(
-            n_healthy_patients=int(args.n_healthy_patients)
-            if args.n_healthy_patients is not None
-            else None,
-            n_tumour_patients=int(args.n_tumour_patients)
-            if args.n_tumour_patients is not None
-            else None,
+            n_healthy_patients=(
+                int(args.n_healthy_patients)
+                if args.n_healthy_patients is not None
+                else None
+            ),
+            n_tumour_patients=(
+                int(args.n_tumour_patients)
+                if args.n_tumour_patients is not None
+                else None
+            ),
             mixed=args.mixed,
         )
     else:
@@ -102,6 +129,7 @@ def main():
         w=args.w,
         num_classes=args.num_classes,
         sample_fn=sample,
+        noise_fn=noise_fn,
     ).run_loop()
 
 
@@ -128,6 +156,7 @@ def create_argparser():
         fp16_scale_growth=1e-3,
         n_tumour_patients=None,
         n_healthy_patients=None,
+        noise_type="gaussian",
         unet_ver="v2",
     )
     defaults.update(model_and_diffusion_defaults())
