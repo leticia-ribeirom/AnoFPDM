@@ -180,12 +180,8 @@ def main():
     logger.configure()
     logger.log(f"args: {args}")
 
-    # set seed for reproducibility, we use 0 in paper
-    torch.random.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    # image_subfolder = args.image_dir
-    # pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
+    image_subfolder = args.image_dir
+    pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
 
     logger.log(f"reading models ...")
     args.num_classes = int(args.num_classes) if args.num_classes else None
@@ -203,6 +199,7 @@ def main():
         split="val",
         mixed=True,
         training=False,
+        seed=args.seed,
         logger=logger,
     )
 
@@ -212,6 +209,7 @@ def main():
         split="test",
         mixed=True,
         training=False,
+        seed=args.seed,
         logger=logger,
     )
 
@@ -316,6 +314,7 @@ def main():
                 median_filter=args.median_filter,
             )
         else:
+            # already obtained tuned parameters
             thr = 0.11
             num2 = torch.tensor([580, 580], device=dist_util.dev())
             pred_mask, pred_lab, pred_map = get_mask_batch_tuned(

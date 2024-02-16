@@ -218,8 +218,11 @@ def get_brats_data_iter(data_dir, batch_size,
                         n_healthy_patients=None, 
                         n_tumour_patients=None,
                         mixed=False,
-                        num_mix=None):
-
+                        num_mix=None,
+                        seed=0):
+    
+    torch.random.manual_seed(seed)
+    
     data = load_brats(data_dir, split, 
                       n_healthy_patients, 
                       n_tumour_patients,

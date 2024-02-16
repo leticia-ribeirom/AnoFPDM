@@ -110,7 +110,7 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
     return thr_01, abe_min, abe_max
 
 
-# %% for ddib style sampling
+# %% for non-dynamical threshold to obtain pred_mask
 def get_mask_for_batch(source, target, threshold, mod, median_filter=True):
     abe_sum = (
         (source[:, mod, ...] - target[:, mod, ...]).abs().mean(dim=1, keepdims=True)
@@ -129,7 +129,16 @@ def get_mask_for_batch(source, target, threshold, mod, median_filter=True):
 
 
 def obtain_optimal_threshold(
-    data_val, diffusion, model, args, device, ddib=True, guided=True, noise_fn=None
+    data_val,
+    diffusion,
+    model,
+    args,
+    device,
+    ddib=True,
+    guided=True,
+    cond_fn=None,
+    noise_fn=None,
+    use_ddpm=False,
 ):
 
     TARGET = []
@@ -140,6 +149,9 @@ def obtain_optimal_threshold(
         source_val = source_val.to(device)
         mask_val = mask_val.to(device)
 
+        # Forward process
+        # if ddib, image will be encoded by DDIM forward process
+        # ddib is from the paper "DUAL DIFFUSION IMPLICIT BRIDGES FOR IMAGE-TO-IMAGE TRANSLATION"
         if ddib:
             noise, _ = sample(
                 model,
@@ -150,33 +162,41 @@ def obtain_optimal_threshold(
                 null=True,
                 dynamic_clip=args.dynamic_clip,
                 normalize_img=False,
+                ddpm=False,
             )
         else:
             t = torch.tensor(
                 [args.sample_steps - 1] * source_val.shape[0], device=device
             )
             ep = noise_fn(source_val, t) if noise_fn else None
+    
             noise = diffusion.q_sample(source_val, t=t, noise=ep)
+            
+        # if guided, y will be used to guide the sampling process
+        if guided:
+            y = torch.ones(source_val.shape[0], dtype=torch.long) * torch.arange(
+                start=0, end=1
+            ).reshape(
+                -1, 1
+            )  # 0 only for healthy
+            y = y.reshape(-1, 1).squeeze().to(device)
+        else:
+            y = None
 
-        y = torch.ones(source_val.shape[0], dtype=torch.long) * torch.arange(
-            start=0, end=1
-        ).reshape(
-            -1, 1
-        )  # 0 only for healthy
-        y = y.reshape(-1, 1).squeeze().to(device)
-
+        # sampling process
         target, _ = sample(
             model,
             diffusion,
-            y=y if guided else None,
+            y=y,
             noise=noise,
             w=args.w,
             noise_fn=noise_fn,
+            cond_fn=cond_fn,
             sample_shape=source_val.shape,
             sample_steps=args.sample_steps,
             dynamic_clip=args.dynamic_clip,
             normalize_img=False,
-            ddpm=ddib,
+            ddpm=use_ddpm,
         )
         TARGET.append(target)
         SOURCE.append(source_val)
@@ -188,6 +208,7 @@ def obtain_optimal_threshold(
 
     dice_max = 0
     thr_opt = 0
+    # range of threshold, select the best one
     threshold_range = np.arange(0.01, 0.7, 0.01)
     for thr in threshold_range:
         PRED_MASK, PRED_MAP, _ = get_mask_for_batch(

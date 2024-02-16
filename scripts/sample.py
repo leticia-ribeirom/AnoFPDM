@@ -10,22 +10,17 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from common import read_model_and_diffusion
 from guided_diffusion import dist_util, logger
-from guided_diffusion.script_util import (
-    model_and_diffusion_defaults,
-    add_dict_to_argparser,
-)
+
 from guided_diffusion.gaussian_diffusion import clamp_to_spatial_quantile
 
-from torchvision.utils import make_grid, save_image
 
 
 def sample(
     model,
     diffusion,
     num_classes=None,
-    w=None,
+    w=-1,
     noise=None,
     y=None,
     cond_fn=None,
@@ -50,7 +45,6 @@ def sample(
         model_kwargs = {"y": y, "threshold": -1, "clf_free": clf_free}
     elif y is not None:
         model_kwargs = {"y": y, "threshold": -1, "clf_free": clf_free}
-
     else:
         model_kwargs = {}
 
@@ -85,6 +79,7 @@ def sample(
         samples = diffusion.p_sample_loop(
             model,
             sample_shape,
+            sample_steps=sample_steps,
             noise=noise,
             cond_fn=cond_fn,
             clip_denoised=clip_denoised,

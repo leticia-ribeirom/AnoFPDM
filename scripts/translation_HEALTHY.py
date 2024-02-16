@@ -26,10 +26,6 @@ from torchvision.utils import save_image, make_grid
 import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 
-torch.random.manual_seed(0)
-np.random.seed(0)
-
-
 def main():
     args = create_argparser().parse_args()
 
@@ -38,7 +34,7 @@ def main():
 
     logger.log(f"args: {args}")
     logger.log("starting to sample.")
-
+    
     image_subfolder = args.image_dir
     pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
 
@@ -82,6 +78,7 @@ def main():
         split="val",
         mixed=True,
         training=False,
+        seed=args.seed,
         logger=logger,
     )
 
@@ -91,6 +88,7 @@ def main():
         split="test",
         mixed=True,
         training=False,
+        seed=args.seed,
         logger=logger,
     )
 
@@ -105,7 +103,7 @@ def main():
 
     opt_thr, dice_max_val = obtain_optimal_threshold(
         data_val, diffusion, model, args, dist_util.dev(), 
-        guided=False, ddib=False, noise_fn=noise_fn
+        guided=False, ddib=False, noise_fn=noise_fn, use_ddpm=args.use_ddpm
     )
     logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
 
@@ -143,7 +141,8 @@ def main():
         t = torch.tensor(
             [args.sample_steps - 1] * source.shape[0], device=dist_util.dev()
         )
-        noise = diffusion.q_sample(source, t=t)
+        ep = noise_fn(source, t) if args.noise_type == "simplex" else None
+        noise = diffusion.q_sample(source, t=t, noise=ep)
 
         Y.append(lab)
 
@@ -156,6 +155,8 @@ def main():
             sample_steps=args.sample_steps,
             dynamic_clip=args.dynamic_clip,
             normalize_img=False,
+            noise_fn=noise_fn,
+            ddpm=args.use_ddpm,
         )
 
         pred_mask, pred_map, pred_lab = get_mask_for_batch(source, target, opt_thr, args.modality)
@@ -274,8 +275,10 @@ def create_argparser():
         data_dir="",
         image_dir="",
         model_dir="",
+        seed=0,
         batch_size=32,
         sample_steps=1000,
+        use_ddpm=True,
         model_num=None,
         ema=False,
         dynamic_clip=False,

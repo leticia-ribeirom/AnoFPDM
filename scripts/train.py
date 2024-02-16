@@ -130,6 +130,7 @@ def main():
         num_classes=args.num_classes,
         sample_fn=sample,
         noise_fn=noise_fn,
+        ddpm_sampling=args.ddpm_sampling,
     ).run_loop()
 
 
@@ -157,6 +158,7 @@ def create_argparser():
         n_tumour_patients=None,
         n_healthy_patients=None,
         noise_type="gaussian",
+        ddpm_sampling=False,
         unet_ver="v2",
     )
     defaults.update(model_and_diffusion_defaults())

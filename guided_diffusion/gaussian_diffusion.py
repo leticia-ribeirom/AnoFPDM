@@ -419,28 +419,6 @@ class GaussianDiffusion:
 
         return out
 
-    def condition_score2(self, cond_fn, p_mean_var, x, t, model_kwargs=None):
-        """
-        Compute what the p_mean_variance output would have been, should the
-        model's score function be conditioned by cond_fn.
-        See condition_mean() for details on cond_fn.
-        Unlike condition_mean(), this instead uses the conditioning strategy
-        from Song et al (2020).
-        """
-        t = t.long()
-        alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
-
-        eps = self._predict_eps_from_xstart(x, t, p_mean_var["pred_xstart"])
-        a, cfn = cond_fn(x, self._scale_timesteps(t).long(), model_kwargs['y'])
-        eps = eps - (1 - alpha_bar).sqrt() * cfn
-
-        out = p_mean_var.copy()
-        out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
-        out["mean"], _, _ = self.q_posterior_mean_variance(
-            x_start=out["pred_xstart"], x_t=x, t=t
-        )
-        return out
-
     def condition_clf_free(self, model, x, t, w, model_kwargs=None):
         """
         cls-free-diff
@@ -463,6 +441,7 @@ class GaussianDiffusion:
         model,
         x,
         t,
+        w=-1,
         clip_denoised=True,
         denoised_fn=None,
         cond_fn=None,
@@ -486,6 +465,14 @@ class GaussianDiffusion:
                  - 'sample': a random sample from the model.
                  - 'pred_xstart': a prediction of x_0.
         """
+        clf_free = (
+            functools.partial(
+                self.condition_clf_free, model=model, w=w, model_kwargs=model_kwargs
+            )
+            if w != -1
+            else None
+        )
+        
         out = self.p_mean_variance(
             model,
             x,
@@ -493,12 +480,14 @@ class GaussianDiffusion:
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
+            clf_free=clf_free,
         )
         noise = th.randn_like(x) if noise_fn is None else noise_fn(x, t)
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-        if cond_fn is not None:
+        
+        if cond_fn is not None and w == -1:  # for classifier guidance
             out["mean"] = self.condition_mean(
                 cond_fn, out, x, t, model_kwargs=model_kwargs
             )
@@ -509,6 +498,8 @@ class GaussianDiffusion:
         self,
         model,
         shape,
+        w=-1,
+        sample_steps=None,
         noise=None,
         noise_fn=None,
         clip_denoised=True,
@@ -541,6 +532,8 @@ class GaussianDiffusion:
         for sample in self.p_sample_loop_progressive(
             model,
             shape,
+            w=w,
+            sample_steps=sample_steps,
             noise=noise,
             noise_fn=noise_fn,
             clip_denoised=clip_denoised,
@@ -557,6 +550,8 @@ class GaussianDiffusion:
         self,
         model,
         shape,
+        w=-1,
+        sample_steps=None,
         noise=None,
         noise_fn=None,
         clip_denoised=True,
@@ -582,14 +577,16 @@ class GaussianDiffusion:
         if noise is not None:
             img = noise
         else:
-            
-            img = th.randn(*shape, device=device)
+            img = th.randn(*shape, device=device) 
             if noise_fn is not None:
                 t = th.tensor([self.num_timesteps - 1] * shape[0], device=device)
                 img = noise_fn(img, t)
-                
-        indices = list(range(self.num_timesteps))[::-1]
-
+        
+        if sample_steps is None:
+            indices = list(range(self.num_timesteps))[::-1]
+        else:
+            indices = list(range(sample_steps))[::-1] 
+        
         if progress:
             # Lazy import so that we don't depend on tqdm.
             from tqdm.auto import tqdm
@@ -603,6 +600,7 @@ class GaussianDiffusion:
                     model,
                     img,
                     t,
+                    w=w,
                     noise_fn=noise_fn,
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn,
@@ -650,7 +648,8 @@ class GaussianDiffusion:
         )
 
         if cond_fn is not None and w == -1:  # for classifier guidance
-            out = self.condition_score2(cond_fn, out, x, t, model_kwargs=model_kwargs)
+            cond_y = {'y':model_kwargs['y']}
+            out = self.condition_score(cond_fn, out, x, t, model_kwargs=cond_y)
         # or it is unguided
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
@@ -744,22 +743,6 @@ class GaussianDiffusion:
         if device is None:
             device = next(model.parameters()).device
         assert isinstance(shape, (tuple, list))
-
-        # if noise is not None:
-        #     img = noise
-        # else:
-        #     if shape[1] == 4:
-        #         img = th.cat(
-        #             [
-        #                 th.randn(shape[0], 1, *shape[2:], device=device)
-        #                 for _ in range(shape[1])
-        #             ],
-        #             dim=1,
-        #         )
-        #     else:
-        #         img = th.randn(*shape, device=device)
-        #     if noise_fn is not None:
-        #         img = noise_fn(img, t)
         
         if noise is not None:
             img = noise

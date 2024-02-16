@@ -48,6 +48,7 @@ class TrainLoop:
             noise_fn=None,
             num_classes=None,
             sample_fn=None,
+            ddpm_sampling=False,
     ):
         self.model = model
         self.diffusion = diffusion
@@ -79,6 +80,7 @@ class TrainLoop:
         self.w = w
         self.num_classes = num_classes
         
+        self.ddpm_sampling = ddpm_sampling
         self.sample_fn=sample_fn
         self.noise_fn=noise_fn
         self.sync_cuda = th.cuda.is_available()
@@ -274,7 +276,7 @@ class TrainLoop:
                                                                          w=w, sample_shape=self.sample_shape, 
                                                                          normalize_img=True,
                                                                          noise_fn=self.noise_fn,
-                                                                         ddpm=True if self.noise_fn else False)
+                                                                         ddpm=self.ddpm_sampling,)
                         
                         if self.sample_shape[1] == 4:
                             samples = samples.reshape(-1, 1, *self.sample_shape[2:])

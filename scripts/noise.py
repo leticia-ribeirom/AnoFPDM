@@ -53,3 +53,6 @@ def generate_simplex_noise(
                         ).repeat(1, 1, 1, 1)
     return noise
 
+# TODO: implement the following function
+def generate_coarse_noise():
+        return None

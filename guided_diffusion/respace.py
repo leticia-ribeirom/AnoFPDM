@@ -99,10 +99,7 @@ class SpacedDiffusion(GaussianDiffusion):
         return super().condition_mean(self._wrap_model(cond_fn), *args, **kwargs)
 
     def condition_score(self, cond_fn, *args, **kwargs):
-        return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
-    
-    def condition_score2(self, cond_fn, *args, **kwargs):
-        return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
+        return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)  
 
     def condition_clf_free(self, model, *args, **kwargs):
         return super().condition_clf_free(self._wrap_model(model), *args, **kwargs)

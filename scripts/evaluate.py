@@ -46,7 +46,7 @@ def evaluate(
     recall_batch = recall(real_mask, recon_mask)
     fpr, tpr, _ = ROC_AUC(source, real_mask, ano_map)
     AUC_score_batch = auc(fpr, tpr)
-    PR_AUC_score_batch = PR_AUC_score(real_mask, ano_map)
+    PR_AUC_score_batch = PR_AUC_score(source, real_mask, ano_map)
 
     return {
         "dice": dice_batch,
@@ -90,6 +90,7 @@ def recall(real_mask, recon_mask):
 def ROC_AUC(source, real_mask, ano_map):
     # note that source is rescaled to [-1, 1]
     # find the region with mean intensity > -0.95 for auc
+    # you can also comment the following line to calculate prauc for the whole image
     foreground = source.mean(dim=1, keepdim=True).reshape(-1) > -0.95
     real_mask = real_mask.reshape(-1)[foreground]
     ano_map = ano_map.reshape(-1)[foreground]
@@ -99,7 +100,13 @@ def ROC_AUC(source, real_mask, ano_map):
     )
 
 
-def PR_AUC_score(real_mask, ano_map):
+def PR_AUC_score(source, real_mask, ano_map):
+    # note that source is rescaled to [-1, 1]
+    # you can find the region with mean intensity > -0.95 for prauc
+    # you can also comment the following line to calculate prauc for the whole image
+    foreground = source.mean(dim=1, keepdim=True).reshape(-1) > -0.95
+    real_mask = real_mask.reshape(-1)[foreground]
+    ano_map = ano_map.reshape(-1)[foreground]
     return average_precision_score(
         real_mask.detach().cpu().numpy().flatten(),
         ano_map.detach().cpu().numpy().flatten(),
