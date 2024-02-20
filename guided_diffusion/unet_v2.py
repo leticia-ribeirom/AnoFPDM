@@ -579,9 +579,16 @@ class UNetModel(nn.Module):
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
         :param y: an [N] Tensor of labels, if class-conditional.
+        :param threshold: a float threshold for clf-free training (portion of samples to be masked)
+                            also indicating if the model is training in clf-free mode
+        :param clf_free: a bool indicating if the model is sampled in clf-free mode
+        :param null: a bool indicating if the null embedding should be used in sampling
         :return: an [N x C x ...] Tensor of outputs.
         """
-        
+        # assert (y is not None) == (
+        #     self.num_classes is not None
+        # ), "must specify y if and only if the model is class-conditional"
+         
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
         cemb_mm = None
@@ -608,7 +615,7 @@ class UNetModel(nn.Module):
                     cemb = th.zeros_like(emb)
                 else: # class condition embedding
                     cemb = self.class_emb(self.label_emb(y)) 
-                cemb_mm = th.einsum("ab,ac -> abc", cemb, cemb)      
+                cemb_mm = th.einsum("ab,ac -> abc", cemb, cemb) 
             else:
                 raise Exception("Invalid condition setup")
                 

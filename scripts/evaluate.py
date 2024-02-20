@@ -138,7 +138,6 @@ def median_pool(ano_map, kernel_size=5, stride=1, padding=2):
     x = x.contiguous().view(x.size()[:4] + (-1,)).median(dim=-1)[0]
     return x
 
-
 def connected_components_3d(volume, thr=20):
     device = volume.device
     is_batch = True

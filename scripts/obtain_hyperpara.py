@@ -5,7 +5,7 @@ from evaluate import evaluate, median_pool
 from noise import generate_simplex_noise
 
 
-# %% for the proposed method
+# %% This block is for the proposed method
 def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     """
     mse_flat: N_val x sample_steps x n_modality
@@ -48,6 +48,10 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
 
 
 def obtain_hyperpara(data_val, diffusion, model, args, device):
+    '''
+    return the optimal threshold for cosine similarity for classification
+            and the range of abe diff for quantile threshold for predicted mask
+    '''
     MSE = []
     MSE_NULL = []
     ABE_DIFF = []
@@ -108,6 +112,104 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
     LAB = torch.cat(LAB, dim=0)
     thr_01, abe_min, abe_max = cal_cos_and_abe_range(MSE, MSE_NULL, ABE_DIFF, LAB)
     return thr_01, abe_min, abe_max
+
+
+def get_mask_batch_FPDM(
+    minibatch_metrics,
+    source,
+    modality,
+    thr_01,
+    abe_min,
+    abe_max,
+    shape,
+    device,
+    thr = None,
+    t_e = None,
+    median_filter=True,
+):
+    """
+    thr_01: threshold for cosine similarity
+    thr: threshold for predicted mask (if not provided, it will be calculated)
+    t_e: steps (noise scale) for predicted mask (if not provided, it will be calculated)  
+    mse: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
+    mse_null: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
+    """
+    mse = (
+        minibatch_metrics["xstart"] - source[:, modality, ...].unsqueeze(1)
+    ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
+    mse_null = (
+        minibatch_metrics["xstart_null"] - source[:, modality, ...].unsqueeze(1)
+    ) ** 2
+
+    abe_diff = torch.mean(
+        torch.abs((mse - mse_null)),
+        dim=(3, 4),  # batch_size x sample_steps x n_modality
+    )
+
+    mse_flat = torch.mean(mse, dim=(2, 3, 4))  # batch_size x sample_steps
+    mse_null_flat = torch.mean(mse_null, dim=(2, 3, 4))
+
+    batch_mask = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
+    batch_map = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
+    cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+
+    quant_range = torch.flip(torch.linspace(0.90, 0.98, 101), dims=(0,)).to(
+        device
+    )
+
+    pred_lab = []
+    for sample_num in range(abe_diff.shape[0]):
+        # get the cosine similarity between mse and mse_null
+        sim = cos(
+            mse_flat[sample_num : sample_num + 1, ...],
+            mse_null_flat[sample_num : sample_num + 1, ...],
+        )
+
+        # get the quantile threshold for predicted mask 
+        abe_diff_i = abe_diff[sample_num, ...]  # sample_steps x n_modality
+        
+        abe_max_i = abe_diff_i.max(dim=0)[0]  # n_modality
+        abe_max_i = torch.clamp((abe_max_i / abe_max), 0, 1)
+        abe_max_i = torch.round(abe_max_i, decimals=2) * 100
+        index = abe_max_i.to(torch.int64)  # n_modality
+        quant = quant_range[index]
+
+        # get the steps for predicted mask
+        t_s_i = 0
+        t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
+
+        mapp = torch.zeros(1, 1, shape, shape).to(device)
+        
+        thr_i = 0 
+        for mod in range(mse.shape[2]):
+            mask_mod = torch.mean(
+                mse[sample_num, t_s_i : t_e_i[mod], [mod], ...], axis=[0, 1], keepdim=True
+            )  # 1 x 1 x 128 x 128
+            
+            thr_i += torch.quantile(mask_mod.reshape(-1), quant[mod])
+            mapp += mask_mod
+
+        # collect the predicted mask and map
+        mapp /= mse.shape[2]
+        mapp = (
+            median_pool(mapp, kernel_size=5, stride=1, padding=2)
+            if median_filter
+            else mapp
+        )
+        batch_map[sample_num] = mapp
+
+        if sim <= thr_01:
+            thr_i = (thr_i / mse.shape[2]) if thr is None else thr
+            mask = mapp >= thr_i
+            batch_mask[sample_num] = mask.float()
+            pred_lab.append(1)
+        else:
+            pred_lab.append(0)
+
+    return batch_mask, torch.tensor(pred_lab), batch_map
+
+
+
 
 
 # %% for non-dynamical threshold to obtain pred_mask

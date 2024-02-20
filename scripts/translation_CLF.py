@@ -1,24 +1,21 @@
-"""
-Synthetic domain translation from a source 2D domain to a target.
-"""
-
 import argparse
 import os
 import pathlib
-
+import random
 import numpy as np
 import torch.distributed as dist
 import torch
 
-from common import read_model_and_diffusion
+from common import read_model_and_diffusion, read_classifier
 from guided_diffusion import dist_util, logger
 from guided_diffusion.script_util import (
     model_and_diffusion_defaults,
     add_dict_to_argparser,
+    classifier_defaults
 )
 
-from data import get_brats_data_iter, check_data
-from obtain_hyperpara import obtain_hyperpara, get_mask_batch_FPDM
+from data import get_brats_data_iter
+
 from evaluate import get_stats, median_pool, evaluate
 from sample import sample
 
@@ -26,6 +23,7 @@ import matplotlib.pyplot as plt
 from torchvision.utils import save_image, make_grid
 import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from obtain_hyperpara import get_mask_for_batch, obtain_optimal_threshold
 
 
 def main():
@@ -34,6 +32,7 @@ def main():
     dist_util.setup_dist()
     logger.configure()
     logger.log(f"args: {args}")
+    
 
     image_subfolder = args.image_dir
     pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
@@ -42,11 +41,29 @@ def main():
     args.num_classes = int(args.num_classes) if args.num_classes else None
     if args.num_classes:
         args.class_cond = True
-    args.multi_class = True if args.num_classes > 2 else False
 
     model, diffusion = read_model_and_diffusion(
         args, args.model_dir, args.model_num, args.ema
     )
+    model.eval()
+
+    classifier = read_classifier(args, args.clf_dir, args.clf_num)
+    classifier.eval()
+
+    def cond_fn(x, t, y=None):
+        assert y is not None
+        with torch.enable_grad():
+            x_in = x.detach().requires_grad_(True)
+            logits = classifier(x_in, t)
+            log_probs = F.log_softmax(logits, dim=-1) # 100x2
+            selected = log_probs[range(len(logits)), y.view(-1)] # 100
+            a = torch.autograd.grad(selected.sum(), x_in)[0] # 100x4x128x128
+            return a * args.classifier_scale
+
+    all_sources = []
+    all_latents = []
+    all_targets = []
+    all_masks = []
 
     data_val = get_brats_data_iter(
         args.data_dir,
@@ -67,22 +84,11 @@ def main():
         seed=args.seed,
         logger=logger,
     )
-
-    model = DDP(
-        model,
-        device_ids=[dist_util.dev()],
-        output_device=dist_util.dev(),
-        broadcast_buffers=False,
-        bucket_cap_mb=128,
-        find_unused_parameters=False,
+    opt_thr, dice_max_val = obtain_optimal_threshold(
+        data_val, diffusion, model, args, dist_util.dev(), ddib=False, cond_fn=cond_fn
     )
-
-    logger.log(f"Validation: starting to get threshold and abe range ...")
-    if not args.tuned:
-        thr_01, abe_min, abe_max = obtain_hyperpara(data_val, diffusion, model, args, dist_util.dev())
-        logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
-
-    logger.log(f"starting to inference ...")
+    logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
+   
 
     DICE = []
     DICE_ANO = []
@@ -101,20 +107,12 @@ def main():
 
     k = 0
     while k < args.num_batches:
-        all_sources = []
-        all_masks = []
-        all_pred_masks = []
-        all_terms = {"xstart_null": [], "xstart": []}
-
         k += 1
 
         source, mask, lab = next(data_test)
-        Y.append(lab)
-
         logger.log(
             f"translating at batch {k} on rank {dist.get_rank()}, shape {source.shape}..."
         )
-        logger.log(f"device: {torch.cuda.current_device()}")
 
         source = source.to(dist_util.dev())
         mask = mask.to(dist_util.dev())
@@ -123,61 +121,35 @@ def main():
             f"source with mean {source.mean()} and std {source.std()} on rank {dist.get_rank()}"
         )
 
-        y0 = torch.ones(source.shape[0], dtype=torch.long) * torch.arange(
+        Y.append(lab)
+
+        y = torch.ones(source.shape[0], dtype=torch.long) * torch.arange(
             start=0, end=1
         ).reshape(
             -1, 1
-        )  # 0 for healthy
-        y0 = y0.reshape(-1, 1).squeeze().to(dist_util.dev())
+        )  # 0 only for healthy
+        y = y.reshape(-1, 1).squeeze().to(dist_util.dev())
 
-        model_kwargs_reverse = {"threshold": -1, "clf_free": True, "null": args.null}
-        model_kwargs0 = {"y": y0, "threshold": -1, "clf_free": True}
+        t = torch.tensor(
+            [args.sample_steps - 1] * source.shape[0], device=dist_util.dev()
+        )
+        noise = diffusion.q_sample(source, t=t)
 
-        # inference
-        minibatch_metrics = diffusion.calc_pred_xstart_loop(
+        target, _ = sample(
             model,
-            source,
-            args.w,
-            modality=args.modality,
-            d_reverse=args.d_reverse,
-            sample_steps=args.rev_steps,
-            model_kwargs=model_kwargs0,
-            model_kwargs_reverse=model_kwargs_reverse,
-            dynamic_clip=args.dynamic_clip,
+            diffusion,
+            y=y,
+            cond_fn=cond_fn,
+            noise=noise,
+            w=args.w,
+            sample_shape=source.shape,
+            sample_steps=args.sample_steps,
+            normalize_img=False,
         )
 
-        # collect metrics
-        if not args.tuned:
-            # w = 2
-            thr_01 = 0.9968
-            abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
-            abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
-            
-            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
-                minibatch_metrics,
-                source,
-                args.modality,
-                thr_01,
-                abe_min,
-                abe_max,
-                args.image_size,
-                median_filter=args.median_filter,
-            )
-        else:
-            # already obtained tuned parameters
-            thr = 0.11
-            thr_01 = 0.9968
-            t_e = torch.tensor([580, 580], device=dist_util.dev())
-            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
-                minibatch_metrics,
-                source,
-                args.modality,
-                thr_01,
-                args.image_size,
-                thr=thr,
-                t_e=t_e,
-                median_filter=args.median_filter,
-            )
+        pred_mask, pred_map, pred_lab = get_mask_for_batch(
+            source, target, opt_thr, args.modality, median_filter=True
+        )
         PRED_Y.append(pred_lab)
 
         eval_metrics = evaluate(mask, pred_mask, source, pred_map)
@@ -240,76 +212,75 @@ def main():
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
+        logger.log(f"finished translation {target.shape}")
 
         if args.save_data:
             logger.log("collecting metrics...")
-            for key in all_terms.keys():
-                terms = minibatch_metrics[key]
-                gathered_terms = [
-                    torch.zeros_like(terms) for _ in range(dist.get_world_size())
-                ]
-                dist.all_gather(gathered_terms, terms)
-                all_terms[key].extend([term.cpu().numpy() for term in gathered_terms])
-
             gathered_source = [
                 torch.zeros_like(source) for _ in range(dist.get_world_size())
+            ]
+            gathered_latent = [
+                torch.zeros_like(noise) for _ in range(dist.get_world_size())
+            ]
+            gathered_target = [
+                torch.zeros_like(target) for _ in range(dist.get_world_size())
             ]
             gathered_mask = [
                 torch.zeros_like(mask) for _ in range(dist.get_world_size())
             ]
-            gathered_pred_mask = [
-                torch.zeros_like(pred_mask) for _ in range(dist.get_world_size())
-            ]
-            
+
             dist.all_gather(gathered_source, source)
+            dist.all_gather(gathered_latent, noise)
+            dist.all_gather(gathered_target, pred_map)
             dist.all_gather(gathered_mask, mask)
-            dist.all_gather(gathered_pred_mask, pred_mask)
             
-            all_sources.extend([source.cpu().numpy() for source in gathered_source])
-            all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
-            all_pred_masks.extend([pred_mask.cpu().numpy()])
-            
-            all_sources = np.concatenate(all_sources, axis=0)
-            all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
-            np.save(all_sources_path, all_sources)
+    if args.save_data:
+        all_sources.extend([source.cpu().numpy() for source in gathered_source])
+        all_latents.extend([noise.cpu().numpy() for noise in gathered_latent])
+        all_targets.extend([target.cpu().numpy() for target in gathered_target])
+        all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
 
-            all_masks = np.concatenate(all_masks, axis=0)
-            all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
-            np.save(all_masks_path, all_masks)
-            
-            all_pred_masks = np.concatenate(all_pred_masks, axis=0)
-            all_pred_masks_path = os.path.join(image_subfolder, f"pred_mask_{k}.npy")
-            np.save(all_pred_masks_path, all_pred_masks)
+        all_sources = np.concatenate(all_sources, axis=0)
+        all_sources_path = os.path.join(image_subfolder, "source.npy")
+        np.save(all_sources_path, all_sources)
 
-            for key in all_terms.keys():
-                all_terms_path = os.path.join(logger.get_dir(), f"{key}_terms_{k}.npy")
-                np.save(all_terms_path, all_terms[key])
+        all_latents = np.concatenate(all_latents, axis=0)
+        all_latents_path = os.path.join(image_subfolder, "latent.npy")
+        np.save(all_latents_path, all_latents)
+
+        all_targets = np.concatenate(all_targets, axis=0)
+        all_targets_path = os.path.join(image_subfolder, "target.npy")
+        np.save(all_targets_path, all_targets)
+
+        all_masks = np.concatenate(all_masks, axis=0)
+        all_masks_path = os.path.join(image_subfolder, "mask.npy")
+        np.save(all_masks_path, all_masks)
 
     dist.barrier()
-
-    logger.log(f"evaluation complete")
+    logger.log(f"synthetic data translation complete")
 
 
 def create_argparser():
     defaults = dict(
         data_dir="",
         image_dir="",
-        model_dir="",
+        model_dir="",  # model directory,
+        clf_dir="", # classifier directory
+        seed=0,
         batch_size=32,
-        rev_steps=600,
+        sample_steps=1000,
         model_num=None,
-        ema=False,
-        null=False,
+        clf_num=None,
+        ema=True,
         save_data=False,
+        dynamic_clip=False,
         num_batches_val=2,
         batch_size_val=100,
-        d_reverse=True,
-        median_filter=True,
-        dynamic_clip=False,
-        tuned=False,
-        seed=0,  # reproduce
+        classifier_scale=100,
+        unet_ver="v1",
     )
     defaults.update(model_and_diffusion_defaults())
+    defaults.update(classifier_defaults())
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -324,7 +295,7 @@ def create_argparser():
         "--w",
         type=float,
         help="weight for clf-free samples",
-        default=-1,  # disabled in default
+        default=-1.0,  # disabled in default
     )
 
     parser.add_argument(

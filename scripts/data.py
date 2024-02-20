@@ -7,7 +7,7 @@ import nibabel as nib
 from tqdm import tqdm
 import os
 import logging
-from torch.utils.data import Dataset, DataLoader, ConcatDataset, WeightedRandomSampler
+from torch.utils.data import Dataset, DataLoader, ConcatDataset, WeightedRandomSampler, RandomSampler
 from torchvision import transforms, datasets
 import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
@@ -221,8 +221,10 @@ def get_brats_data_iter(data_dir, batch_size,
                         num_mix=None,
                         seed=0):
     
-    torch.random.manual_seed(seed)
-    
+    # torch.random.manual_seed(seed)
+    rng = torch.Generator()
+    rng.manual_seed(seed)
+
     data = load_brats(data_dir, split, 
                       n_healthy_patients, 
                       n_tumour_patients,
@@ -244,16 +246,18 @@ def get_brats_data_iter(data_dir, batch_size,
         samples_weight = samples_weight.double()
         replacement = True 
         sampler = WeightedRandomSampler(samples_weight, len(samples_weight), 
-                                        replacement=replacement)
+                                        replacement=replacement, generator=rng)
+    else:
+        sampler = RandomSampler(data, generator=rng)
 
     
    
     loader = DataLoader(data,
                         batch_size=batch_size, 
                         num_workers=4, 
-                        shuffle=True if split == 'test' or split == 'train' else False, 
+                        shuffle=False, 
                         drop_last=True if split == 'train' else False,
-                        sampler=sampler if split == 'val' else None) 
+                        sampler=sampler) 
     
     if logger is not None:
         logger.log(f"data_size: {data.__len__()}")
@@ -268,7 +272,7 @@ def check_data(loader, image_dir, split='train', name='cifar10'):
     if split == 'train':
         samples, _ = next(loader) 
     else:
-        samples, _, _ = next(loader)
+        samples, gt, _ = next(loader)
     
     samples_for_each_cls = 8
     if name == 'cifar10':
@@ -283,7 +287,10 @@ def check_data(loader, image_dir, split='train', name='cifar10'):
     
     os.makedirs(image_dir, exist_ok=True)
     
-    save_image(images, os.path.join(image_dir, 'real_{}.png'.format(split)))
+    save_image(images, os.path.join(image_dir, f'real_{name}_{split}.png'))
+    if split != 'train':
+        save_image(make_grid(gt, nrow=samples_for_each_cls), 
+                   os.path.join(image_dir, f'gt_{name}_{split}.png'))
 
 def get_data_iter(name, data_dir, batch_size, 
                   split='train', ret_lab=False, 
@@ -304,30 +311,36 @@ def get_data_iter(name, data_dir, batch_size,
         raise NotImplementedError
     
 if __name__ == '__main__':
-    data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00"
+    # data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
+    # data_dir="/data/amciilab/yiming/DATA/NFBS/preprocessed_data_t1_00_128"
+    data_dir="/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
     data = get_brats_data_iter(data_dir, 
-                                64, 
+                                128, 
                                 split='test', 
                                 training=True,
-                                n_healthy_patients=None, 
-                                n_tumour_patients=None,
-                                mixed=True,
+                                # n_healthy_patients=None, 
+                                # n_tumour_patients=None,
+                                # mixed=True,
+                                n_healthy_patients=0,
                                 ret_lab=True
                                 )
     samples, gt, lab = next(data)
     print('batch shape: ', samples.shape)
     print('sample shape: ', samples[0].shape)
-    # print('label: ', lab['y'])
+    print('gt: ',gt.shape)
+    print('lab: ', lab.shape)
+    print('lab: ', lab)
+    
     # print('slice_num: ', slice_num[0])
     print('channel 1 max: ', samples[0][0].max())
     print('channel 1 min: ', samples[0][0].min())
-    print('channel 2 max: ', samples[0][1].max())
-    print('channel 2 min: ', samples[0][1].min())
-    print('channel 3 max: ', samples[0][2].max())
-    print('channel 3 min: ', samples[0][2].min())
-    print('channel 4 max: ', samples[0][3].max())
-    print('channel 4 min: ', samples[0][3].min())
+    # print('channel 2 max: ', samples[0][1].max())
+    # print('channel 2 min: ', samples[0][1].min())
+    # print('channel 3 max: ', samples[0][2].max())
+    # print('channel 3 min: ', samples[0][2].min())
+    # print('channel 4 max: ', samples[0][3].max())
+    # print('channel 4 min: ', samples[0][3].min())
         
-    
+    check_data(data, split='test', image_dir='./', name='nfbs')
     
 

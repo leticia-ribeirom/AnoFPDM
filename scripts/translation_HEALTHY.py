@@ -101,6 +101,8 @@ def main():
         find_unused_parameters=False,
     )
 
+    
+    
     opt_thr, dice_max_val = obtain_optimal_threshold(
         data_val, diffusion, model, args, dist_util.dev(), 
         guided=False, ddib=False, noise_fn=noise_fn, use_ddpm=args.use_ddpm
@@ -122,6 +124,7 @@ def main():
     Y = []
     PRED_Y = []
 
+    
     k = 0
     while k < args.num_batches:
         k += 1
@@ -241,7 +244,7 @@ def main():
 
             dist.all_gather(gathered_source, source)
             dist.all_gather(gathered_latent, noise)
-            dist.all_gather(gathered_target, target)
+            dist.all_gather(gathered_target, pred_map)
             dist.all_gather(gathered_mask, mask)
 
             all_sources.extend([source.cpu().numpy() for source in gathered_source])

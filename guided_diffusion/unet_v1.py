@@ -654,9 +654,9 @@ class UNetModel(nn.Module):
         :return: an [N x C x ...] Tensor of outputs.
         """
 
-        assert (y is not None) == (
-            self.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
+        # assert (y is not None) == (
+        #     self.num_classes is not None
+        # ), "must specify y if and only if the model is class-conditional"
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
@@ -668,7 +668,7 @@ class UNetModel(nn.Module):
         For non clf-free sampling, e.g., classifier guided, set threshold = -1, and clf_free = False
         """
         if self.num_classes is not None:
-            assert y.shape == (x.shape[0],)
+            # assert y.shape == (x.shape[0],)
             cemb = None
 
             if threshold != -1:  # for clf-free training
