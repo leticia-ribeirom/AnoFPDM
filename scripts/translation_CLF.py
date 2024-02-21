@@ -64,16 +64,9 @@ def main():
     all_latents = []
     all_targets = []
     all_masks = []
+    all_pred_maps = []
 
-    data_val = get_brats_data_iter(
-        args.data_dir,
-        args.batch_size_val,
-        split="val",
-        mixed=True,
-        training=False,
-        seed=args.seed,
-        logger=logger,
-    )
+    
 
     data_test = get_brats_data_iter(
         args.data_dir,
@@ -84,10 +77,21 @@ def main():
         seed=args.seed,
         logger=logger,
     )
-    opt_thr, dice_max_val = obtain_optimal_threshold(
-        data_val, diffusion, model, args, dist_util.dev(), ddib=False, cond_fn=cond_fn
-    )
-    logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
+    
+    if args.num_batches_val != 0:
+        data_val = get_brats_data_iter(
+            args.data_dir,
+            args.batch_size_val,
+            split="val",
+            mixed=True,
+            training=False,
+            seed=args.seed,
+            logger=logger,
+        )
+        opt_thr, dice_max_val = obtain_optimal_threshold(
+            data_val, diffusion, model, args, dist_util.dev(), ddib=False, cond_fn=cond_fn
+        )
+        logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
    
 
     DICE = []
@@ -146,7 +150,9 @@ def main():
             sample_steps=args.sample_steps,
             normalize_img=False,
         )
-
+        
+        if args.num_batches_val == 0:
+            opt_thr = 0.24 # for optimal setup
         pred_mask, pred_map, pred_lab = get_mask_for_batch(
             source, target, opt_thr, args.modality, median_filter=True
         )
@@ -228,17 +234,22 @@ def main():
             gathered_mask = [
                 torch.zeros_like(mask) for _ in range(dist.get_world_size())
             ]
+            gathered_pred_map = [
+                torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
+            ]
 
             dist.all_gather(gathered_source, source)
             dist.all_gather(gathered_latent, noise)
-            dist.all_gather(gathered_target, pred_map)
+            dist.all_gather(gathered_target, target)
             dist.all_gather(gathered_mask, mask)
+            dist.all_gather(gathered_pred_map, pred_map)
             
     if args.save_data:
         all_sources.extend([source.cpu().numpy() for source in gathered_source])
         all_latents.extend([noise.cpu().numpy() for noise in gathered_latent])
         all_targets.extend([target.cpu().numpy() for target in gathered_target])
         all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
+        all_pred_maps.extend([pred_map.cpu().numpy() for pred_map in gathered_pred_map])
 
         all_sources = np.concatenate(all_sources, axis=0)
         all_sources_path = os.path.join(image_subfolder, "source.npy")
@@ -255,6 +266,10 @@ def main():
         all_masks = np.concatenate(all_masks, axis=0)
         all_masks_path = os.path.join(image_subfolder, "mask.npy")
         np.save(all_masks_path, all_masks)
+        
+        all_pred_maps = np.concatenate(all_pred_maps, axis=0)
+        all_pred_maps_path = os.path.join(image_subfolder, "pred_map.npy")
+        np.save(all_pred_maps_path, all_pred_maps)
 
     dist.barrier()
     logger.log(f"synthetic data translation complete")

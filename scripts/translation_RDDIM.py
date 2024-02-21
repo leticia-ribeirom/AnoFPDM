@@ -48,16 +48,6 @@ def main():
         args, args.model_dir, args.model_num, args.ema
     )
 
-    data_val = get_brats_data_iter(
-        args.data_dir,
-        args.batch_size_val,
-        split="val",
-        mixed=True,
-        training=False,
-        seed=args.seed,
-        logger=logger,
-    )
-
     data_test = get_brats_data_iter(
         args.data_dir,
         args.batch_size,
@@ -78,7 +68,19 @@ def main():
     )
 
     logger.log(f"Validation: starting to get threshold and abe range ...")
-    if not args.tuned:
+    
+    if args.num_batches_val != 0:
+        data_val = get_brats_data_iter(
+            args.data_dir,
+            args.batch_size_val,
+            split="val",
+            mixed=True,
+            training=False,
+            seed=args.seed,
+            logger=logger,
+        )
+        
+    if not args.tuned and args.num_batches_val != 0:
         thr_01, abe_min, abe_max = obtain_hyperpara(data_val, diffusion, model, args, dist_util.dev())
         logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
 
@@ -103,7 +105,7 @@ def main():
     while k < args.num_batches:
         all_sources = []
         all_masks = []
-        all_pred_masks = []
+        all_pred_maps = []
         all_terms = {"xstart_null": [], "xstart": []}
 
         k += 1
@@ -148,10 +150,10 @@ def main():
 
         # collect metrics
         if not args.tuned:
-            # w = 2
-            thr_01 = 0.9968
-            abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
-            abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
+            if args.num_batches_val == 0:
+                thr_01 = 0.9968
+                abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
+                abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
             
             pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
                 minibatch_metrics,
@@ -162,6 +164,7 @@ def main():
                 abe_max,
                 args.image_size,
                 median_filter=args.median_filter,
+                device=dist_util.dev(),
             )
         else:
             # already obtained tuned parameters
@@ -177,6 +180,7 @@ def main():
                 thr=thr,
                 t_e=t_e,
                 median_filter=args.median_filter,
+                device=dist_util.dev(),
             )
         PRED_Y.append(pred_lab)
 
@@ -257,17 +261,17 @@ def main():
             gathered_mask = [
                 torch.zeros_like(mask) for _ in range(dist.get_world_size())
             ]
-            gathered_pred_mask = [
-                torch.zeros_like(pred_mask) for _ in range(dist.get_world_size())
+            gathered_pred_map = [
+                torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
             ]
             
             dist.all_gather(gathered_source, source)
             dist.all_gather(gathered_mask, mask)
-            dist.all_gather(gathered_pred_mask, pred_mask)
+            dist.all_gather(gathered_pred_map, pred_map)
             
             all_sources.extend([source.cpu().numpy() for source in gathered_source])
             all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
-            all_pred_masks.extend([pred_mask.cpu().numpy()])
+            all_pred_maps.extend([pred_map.cpu().numpy() for pred_map in gathered_pred_map])
             
             all_sources = np.concatenate(all_sources, axis=0)
             all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
@@ -277,9 +281,9 @@ def main():
             all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
             np.save(all_masks_path, all_masks)
             
-            all_pred_masks = np.concatenate(all_pred_masks, axis=0)
-            all_pred_masks_path = os.path.join(image_subfolder, f"pred_mask_{k}.npy")
-            np.save(all_pred_masks_path, all_pred_masks)
+            all_pred_maps = np.concatenate(all_pred_maps, axis=0)
+            all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
+            np.save(all_pred_maps_path, all_pred_maps)
 
             for key in all_terms.keys():
                 all_terms_path = os.path.join(logger.get_dir(), f"{key}_terms_{k}.npy")
