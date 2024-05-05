@@ -72,7 +72,8 @@ class TrainLoop:
 
         self.step = 0
         self.resume_step = 0
-        self.global_batch = self.batch_size * dist.get_world_size()
+        # self.global_batch = self.batch_size * dist.get_world_size()
+        self.global_batch = self.batch_size
         
         self.sample_shape = sample_shape
         self.img_dir = img_dir

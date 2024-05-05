@@ -686,6 +686,8 @@ class UNetModel(nn.Module):
             # for non-clf-free condition embedding, e.g., classifier guided sampling
             elif threshold == -1 and not clf_free:
                 cemb = self.label_emb(y)
+            else:
+                raise Exception("Invalid condition setup")
 
             assert cemb is not None
             emb = emb + cemb

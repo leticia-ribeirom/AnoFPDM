@@ -95,7 +95,7 @@ def main():
     data = get_data_iter(
         args.name,
         args.data_dir,
-        args.batch_size,
+        args.batch_size, # global batch size, for each device it will be batch_size // num_devices
         split=args.split,
         ret_lab=args.ret_lab,
         logger=logger,

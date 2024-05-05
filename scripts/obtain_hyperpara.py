@@ -175,15 +175,32 @@ def get_mask_batch_FPDM(
         quant = quant_range[index]
 
         # get the steps for predicted mask
-        t_s_i = 0
+        
+        # max_vals, _ = torch.max(abe_diff_i, dim=0)
+        # threshold = 0.95 * max_vals
+        # t_s_i = torch.argmax((abe_diff_i > threshold).int(), dim=0)
+        # t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
+        # if t_s_i[0] ==  t_e_i[0]:
+        #     t_s_i[0] = t_e_i[0] - 5
+            
+        # if t_s_i[1] == t_e_i[1]:
+        #     t_s_i[1] = t_e_i[1] - 5
+        # print(f"t_s_i: {t_s_i}, t_e_i: {t_e_i}")
+        t_s_i = torch.tensor([0, 0], device=device)
         t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
+        
+        
+        # max_vals, _ = torch.max(abe_diff_i, dim=0)
+        # threshold = 0.95 * max_vals
+        # t_s_i = torch.argmax((abe_diff_i > threshold).int(), dim=0) 
+        # t_e_i = len(abe_diff_i) - 1 - torch.argmax((abe_diff_i.flip(0) > threshold), dim=0)  if t_e is None else t_e # n_modality
 
         mapp = torch.zeros(1, 1, shape, shape).to(device)
         
         thr_i = 0 
         for mod in range(mse.shape[2]):
             mask_mod = torch.mean(
-                mse[sample_num, t_s_i : t_e_i[mod], [mod], ...], axis=[0, 1], keepdim=True
+                mse[sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...], axis=[0, 1], keepdim=True
             )  # 1 x 1 x 128 x 128
             
             thr_i += torch.quantile(mask_mod.reshape(-1), quant[mod])
