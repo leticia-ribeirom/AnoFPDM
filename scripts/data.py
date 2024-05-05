@@ -338,13 +338,6 @@ def get_brats_data_iter(
             seed=seed,
         )
 
-    # loader = DataLoader(data,
-    #                     batch_size=batch_size,
-    #                     num_workers=4,
-    #                     shuffle=False,
-    #                     drop_last=True if split == 'train' else False,
-    #                     sampler=sampler)
-
     loader = DataLoader(
         data,
         batch_size=int(batch_size // dist.get_world_size()),
@@ -352,7 +345,7 @@ def get_brats_data_iter(
         sampler=sampler,
         num_workers=4,
         pin_memory=True,
-        drop_last=True,
+        drop_last=True if split == 'train' else False,
     )
 
     if logger is not None:
