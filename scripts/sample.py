@@ -15,7 +15,6 @@ from guided_diffusion import dist_util, logger
 from guided_diffusion.gaussian_diffusion import clamp_to_spatial_quantile
 
 
-
 def sample(
     model,
     diffusion,

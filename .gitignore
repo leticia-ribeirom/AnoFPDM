@@ -1,7 +1,10 @@
 __pycache__/
 
 *.DS_store
-*.sh
+run_preprocess.sh
+run_train_cifar*.sh
+run_translation_anoddpm.sh
+
 *.out
 *.err
 test*
@@ -10,3 +13,5 @@ test*
 /logs*/
 /slurm_out/
 /kl_test/
+preprocess_t1.py
+/trained_weights/

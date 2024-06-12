@@ -59,7 +59,7 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
 
     # TODO: make it memory efficient!
     for i in range(args.num_batches_val):
-        source_val, _, lab_val = next(data_val)
+        source_val, _, lab_val = data_val.__iter__().__next__()
         source_val = source_val.to(device)
 
         y0 = torch.ones(source_val.shape[0], dtype=torch.long) * torch.arange(
@@ -71,7 +71,7 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
 
         model_kwargs_reverse = {"threshold": -1, "clf_free": True, "null": args.null}
         model_kwargs = {"y": y0, "threshold": -1, "clf_free": True}
-        minibatch_metrics = diffusion.calc_pred_xstart_loop(
+        xstarts = diffusion.calc_pred_xstart_loop(
             model,
             source_val,
             args.w,
@@ -83,15 +83,14 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
         )
 
         mse = (
-            minibatch_metrics["xstart"] - source_val[:, args.modality, ...].unsqueeze(1)
+            xstarts["xstart"] - source_val[:, args.modality, ...].unsqueeze(1)
         ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
-        # mse = torch.mean(mse, dim=2, keepdim=True) # batch_size x sample_steps x 1 x 128 x 128
+      
 
         mse_null = (
-            minibatch_metrics["xstart_null"]
+            xstarts["xstart_null"]
             - source_val[:, args.modality, ...].unsqueeze(1)
         ) ** 2
-        # mse_null = torch.mean(mse_null, dim=2, keepdim=True)
 
         abe_diff = torch.abs(
             (mse - mse_null)
@@ -115,7 +114,7 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
 
 
 def get_mask_batch_FPDM(
-    minibatch_metrics,
+    xstarts,
     source,
     modality,
     thr_01,
@@ -126,19 +125,21 @@ def get_mask_batch_FPDM(
     thr = None,
     t_e = None,
     median_filter=True,
+    last_only=False,
+    interval=-1,
 ):
     """
-    thr_01: threshold for cosine similarity
+    thr_01: threshold for cosine similarity (healthy or unhealthy)
     thr: threshold for predicted mask (if not provided, it will be calculated)
     t_e: steps (noise scale) for predicted mask (if not provided, it will be calculated)  
     mse: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
     mse_null: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
     """
     mse = (
-        minibatch_metrics["xstart"] - source[:, modality, ...].unsqueeze(1)
+        xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)
     ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
     mse_null = (
-        minibatch_metrics["xstart_null"] - source[:, modality, ...].unsqueeze(1)
+        xstarts["xstart_null"] - source[:, modality, ...].unsqueeze(1)
     ) ** 2
 
     abe_diff = torch.mean(
@@ -171,43 +172,39 @@ def get_mask_batch_FPDM(
         abe_max_i = abe_diff_i.max(dim=0)[0]  # n_modality
         abe_max_i = torch.clamp((abe_max_i / abe_max), 0, 1)
         abe_max_i = torch.round(abe_max_i, decimals=2) * 100
+        
         index = abe_max_i.to(torch.int64)  # n_modality
         quant = quant_range[index]
 
         # get the steps for predicted mask
-        
-        # max_vals, _ = torch.max(abe_diff_i, dim=0)
-        # threshold = 0.95 * max_vals
-        # t_s_i = torch.argmax((abe_diff_i > threshold).int(), dim=0)
-        # t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
-        # if t_s_i[0] ==  t_e_i[0]:
-        #     t_s_i[0] = t_e_i[0] - 5
-            
-        # if t_s_i[1] == t_e_i[1]:
-        #     t_s_i[1] = t_e_i[1] - 5
-        # print(f"t_s_i: {t_s_i}, t_e_i: {t_e_i}")
         t_s_i = torch.tensor([0, 0], device=device)
         t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
         
         
-        # max_vals, _ = torch.max(abe_diff_i, dim=0)
-        # threshold = 0.95 * max_vals
-        # t_s_i = torch.argmax((abe_diff_i > threshold).int(), dim=0) 
-        # t_e_i = len(abe_diff_i) - 1 - torch.argmax((abe_diff_i.flip(0) > threshold), dim=0)  if t_e is None else t_e # n_modality
-
-        mapp = torch.zeros(1, 1, shape, shape).to(device)
+        if last_only:
+            t_s_i = t_e_i - 1
+            assert interval == -1 # no interval for last_only
         
         thr_i = 0 
+        mapp = torch.zeros(1, 1, shape, shape).to(device)
         for mod in range(mse.shape[2]):
+            mse_subset = mse[sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...] # sample_steps x 1 x 128 x 128
+            
+            if interval != -1:
+                assert interval > 0
+                mse_subset = mse_subset[::interval, ...]
+                # add the last step
+                mse_subset = torch.cat([mse_subset, mse[sample_num, t_e_i[mod]:t_e_i[mod]+1, [mod], ...]], dim=0)
+                
             mask_mod = torch.mean(
-                mse[sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...], axis=[0, 1], keepdim=True
+                mse_subset, axis=[0, 1], keepdim=True
             )  # 1 x 1 x 128 x 128
             
             thr_i += torch.quantile(mask_mod.reshape(-1), quant[mod])
             mapp += mask_mod
 
         # collect the predicted mask and map
-        mapp /= mse.shape[2]
+        mapp /= mse.shape[2] # average over n_modality
         mapp = (
             median_pool(mapp, kernel_size=5, stride=1, padding=2)
             if median_filter
@@ -230,7 +227,7 @@ def get_mask_batch_FPDM(
 
 
 # %% for non-dynamical threshold to obtain pred_mask
-def get_mask_for_batch(source, target, threshold, mod, median_filter=True):
+def get_mask_batch(source, target, threshold, mod, median_filter=True):
     abe_sum = (
         (source[:, mod, ...] - target[:, mod, ...]).abs().mean(dim=1, keepdims=True)
     )  # nx1x128x128
@@ -330,7 +327,7 @@ def obtain_optimal_threshold(
     # range of threshold, select the best one
     threshold_range = np.arange(0.01, 0.7, 0.01)
     for thr in threshold_range:
-        PRED_MASK, PRED_MAP, _ = get_mask_for_batch(
+        PRED_MASK, PRED_MAP, _ = get_mask_batch(
             SOURCE, TARGET, thr, args.modality, median_filter=True
         )
         eval_metrics = evaluate(MASK, PRED_MASK, SOURCE, PRED_MAP)

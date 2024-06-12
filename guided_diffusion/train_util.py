@@ -49,10 +49,11 @@ class TrainLoop:
             num_classes=None,
             sample_fn=None,
             ddpm_sampling=False,
+            total_epochs=None,
     ):
         self.model = model
         self.diffusion = diffusion
-        self.data = data
+        self.data, self.sampler = data
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
         self.lr = lr
@@ -69,11 +70,11 @@ class TrainLoop:
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
+        self.total_epochs = total_epochs
 
         self.step = 0
         self.resume_step = 0
-        # self.global_batch = self.batch_size * dist.get_world_size()
-        self.global_batch = self.batch_size
+        self.global_batch = self.batch_size # golbal batch size is the same as batch size
         
         self.sample_shape = sample_shape
         self.img_dir = img_dir
@@ -172,24 +173,26 @@ class TrainLoop:
             self.opt.load_state_dict(state_dict)
         
     def run_loop(self):
-        while (
-                not self.lr_anneal_steps
-                or self.step + self.resume_step < self.lr_anneal_steps
-        ):
-            self.step += 1
+        # while (
+        #         not self.lr_anneal_steps
+        #         or self.step + self.resume_step < self.lr_anneal_steps
+        # ):
             
-            batch, cond = next(self.data)
+            # batch, cond = next(self.data)
             # logger.log(f"batch mean: {batch.mean()}, std: {batch.std()}")
-            
-            self.run_step(batch, cond)
-            if self.step % self.log_interval == 0:
-                logger.dumpkvs()
-            if self.step % self.save_interval == 0:
-                self.save()
-                # Run for a finite amount of time in integration tests.
-                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
-                    logger.log("stopping early for testing")
-                    return
+        for epoch in range(self.total_epochs):
+            self.sampler.set_epoch(epoch)
+            for batch, cond in self.data:            
+                self.step += 1
+                self.run_step(batch, cond)
+                if self.step % self.log_interval == 0:
+                    logger.dumpkvs()
+                if self.step % self.save_interval == 0:
+                    self.save()
+                    # Run for a finite amount of time in integration tests.
+                    if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                        logger.log("stopping early for testing")
+                        return
             
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:

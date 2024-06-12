@@ -22,59 +22,14 @@ from torchvision import transforms, datasets
 import torch.distributed as dist
 
 
-# %% cifar10
-class cifar10(Dataset):
-    def __init__(self, data_dir, split, transform=None, ret_lab=False):
-        self.data_dir = data_dir
-        self.transform = transform
-        self.ret_lab = ret_lab
-        train = True if split == "train" else False
-        self.data = datasets.CIFAR10(root=data_dir, train=train, download=True)
-        self.data_size = self.data.__len__()
 
-    def __len__(self):
-        return self.data_size
-
-    def __getitem__(self, idx):
-        x, y = self.data[idx]
-        if self.transform is not None:
-            x = self.transform(x)
-        if not self.ret_lab:
-            return x, {}
-        else:
-            return x, {"y": y}
-
-
-def get_cifar10_iter(
-    data_dir, batch_size, split, ret_lab=False, logger=None, training=True
-):
-    transform = transforms.Compose(
-        [
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]
-    )
-    data = cifar10(data_dir, split, ret_lab=ret_lab, transform=transform)
-    loader = DataLoader(
-        data, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True
-    )
-    if logger is not None:
-        logger.log(f"data_size: {data.__len__()}")
-
-    if training:
-        while True:
-            yield from loader
-    else:
-        yield from loader
-    return
 
 
 # %% for BraTS dataset
 
 
 # modification based on https://github.com/AntanasKascenas/DenoisingAE/blob/master/src/data.py
-class PatientDataset(torch.utils.data.Dataset):
+class PatientDataset(Dataset):
     """
     Dataset class representing a collection of slices from a single scan.
     """
@@ -120,7 +75,7 @@ class PatientDataset(torch.utils.data.Dataset):
         return self.len
 
 
-class BrainDataset(torch.utils.data.Dataset):
+class BrainDataset(Dataset):
     """
     Dataset class representing a collection of slices from scans from a specific dataset split.
     """
@@ -162,30 +117,21 @@ class BrainDataset(torch.utils.data.Dataset):
 
             if_tumor = torch.from_numpy(y[0]).float().sum() > 0
             lab = 1 if if_tumor else 0
-
-            if x_tensor.shape[2] == 240:
-                x_tensor = F.pad(x_tensor, (8, 8, 8, 8), mode="constant", value=0)
-                y_tensor = F.pad(y_tensor, (8, 8, 8, 8), mode="constant", value=0)
-
-            if x_tensor.shape[0] == 1:
-                x_tensor = (x_tensor - x_tensor.min()) / (
-                    x_tensor.max() - x_tensor.min()
-                )  # [0, 1]
-            else:
-                x_min = x_tensor.view(x_tensor.shape[0], -1).min(1).values
-                x_max = x_tensor.view(x_tensor.shape[0], -1).max(1).values
-                x_tensor = (x_tensor - x_min[:, None, None]) / (
-                    x_max[:, None, None] - x_min[:, None, None] + 0.00001
-                )  # [0, 1]
-
+            
+            # rescacle to [-1, 1]
+            x_min = x_tensor.view(x_tensor.shape[0], -1).min(1).values
+            x_max = x_tensor.view(x_tensor.shape[0], -1).max(1).values
+            x_tensor = (x_tensor - x_min[:, None, None]) / (
+                x_max[:, None, None] - x_min[:, None, None] + 0.00001
+            )  # [0, 1]
             x_tensor = x_tensor * 2 - 1  # [-1, 1]
             return x_tensor, y_tensor, lab
 
         patient_dirs = sorted(list(path.iterdir()))
         self.rng.shuffle(patient_dirs)
 
-        # Patients with tumours
-        if mixed:
+        
+        if mixed: # take all slices 
             num_mix = len(patient_dirs) if num_mix is None else num_mix
             self.patient_datasets = [
                 PatientDataset(
@@ -193,7 +139,7 @@ class BrainDataset(torch.utils.data.Dataset):
                 )
                 for i in range(num_mix)
             ]
-        else:
+        else: # take n_tumour_patients and n_healthy_patients
             assert (n_tumour_patients is not None) or (n_healthy_patients is not None)
             self.n_tumour_patients = (
                 n_tumour_patients
@@ -291,7 +237,6 @@ def get_brats_data_iter(
     split="train",
     ret_lab=False,
     logger=None,
-    training=True,
     n_healthy_patients=None,
     n_tumour_patients=None,
     mixed=False,
@@ -313,7 +258,7 @@ def get_brats_data_iter(
         num_mix=num_mix,
     )
 
-    if split == "val":
+    if split == "val": # for single GPU
         labels = [data[i][2] for i in range(len(data))]
 
         class_sample_count = np.array(
@@ -328,8 +273,7 @@ def get_brats_data_iter(
         sampler = WeightedRandomSampler(
             samples_weight, len(samples_weight), replacement=replacement, generator=rng
         )
-    else:
-        # sampler = RandomSampler(data, generator=rng)
+    elif split == "train":
         sampler = DistributedSampler(
             data,
             num_replicas=dist.get_world_size(),
@@ -337,10 +281,12 @@ def get_brats_data_iter(
             shuffle=True,
             seed=seed,
         )
+    else:
+        sampler = RandomSampler(data, generator=rng)
 
     loader = DataLoader(
         data,
-        batch_size=int(batch_size // dist.get_world_size()),
+        batch_size=int(batch_size // dist.get_world_size()) if split == "train" else batch_size,
         shuffle=False,
         sampler=sampler,
         num_workers=4,
@@ -351,22 +297,24 @@ def get_brats_data_iter(
     if logger is not None:
         logger.log(f"data_size: {data.__len__()}")
 
-    if training:
-        while True:
-            yield from loader
-    else:
-        yield from loader
+    
+    # if training:
+    #     while True:
+    #         yield from loader
+    # else:
+    #     yield from loader
+    if split == "train":
+        return loader, sampler
+    return loader
 
 
 def check_data(loader, image_dir, split="train", name="cifar10"):
     if split == "train":
-        samples, _ = next(loader)
+        samples, _ = loader.__iter__().__next__()
     else:
-        samples, gt, _ = next(loader)
+        samples, gt, _ = loader.__iter__().__next__()
 
     samples_for_each_cls = 8
-    if name == "cifar10":
-        samples = (samples[:32, ...] + 1) / 2
 
     if samples.shape[1] == 4:
         samples_for_each_cls = samples.shape[1]
@@ -385,13 +333,14 @@ def check_data(loader, image_dir, split="train", name="cifar10"):
         )
 
 
+        
+
 def get_data_iter(
     name,
     data_dir,
     batch_size,
     split="train",
     ret_lab=False,
-    training=True,
     logger=None,
     kwargs=None,
 ):
@@ -403,36 +352,25 @@ def get_data_iter(
             split=split,
             ret_lab=ret_lab,
             logger=logger,
-            training=training,
             **kwargs,
         )
-    elif name.lower() == "cifar10":
-        return get_cifar10_iter(
-            data_dir,
-            batch_size,
-            split=split,
-            ret_lab=ret_lab,
-            logger=logger,
-            training=training,
-        )
-
+    elif name.lower() == "t1":
+        pass
     else:
         raise NotImplementedError
 
 
 if __name__ == "__main__":
-    # data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
-    # data_dir="/data/amciilab/yiming/DATA/NFBS/preprocessed_data_t1_00_128"
+  
     data_dir = "/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
     data = get_brats_data_iter(
         data_dir,
         128,
         split="test",
-        training=True,
+        training=False,
         # n_healthy_patients=None,
         # n_tumour_patients=None,
-        # mixed=True,
-        n_healthy_patients=0,
+        mixed=True,
         ret_lab=True,
     )
     samples, gt, lab = next(data)
@@ -445,11 +383,11 @@ if __name__ == "__main__":
     # print('slice_num: ', slice_num[0])
     print("channel 1 max: ", samples[0][0].max())
     print("channel 1 min: ", samples[0][0].min())
-    # print('channel 2 max: ', samples[0][1].max())
-    # print('channel 2 min: ', samples[0][1].min())
-    # print('channel 3 max: ', samples[0][2].max())
-    # print('channel 3 min: ', samples[0][2].min())
-    # print('channel 4 max: ', samples[0][3].max())
-    # print('channel 4 min: ', samples[0][3].min())
+    print('channel 2 max: ', samples[0][1].max())
+    print('channel 2 min: ', samples[0][1].min())
+    print('channel 3 max: ', samples[0][2].max())
+    print('channel 3 min: ', samples[0][2].min())
+    print('channel 4 max: ', samples[0][3].max())
+    print('channel 4 min: ', samples[0][3].min())
 
-    check_data(data, split="test", image_dir="./", name="nfbs")
+    check_data(data, split="test", image_dir="./", name="mmbrain")

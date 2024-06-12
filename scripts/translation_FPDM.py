@@ -20,7 +20,6 @@ from guided_diffusion.script_util import (
 from data import get_brats_data_iter, check_data
 from obtain_hyperpara import obtain_hyperpara, get_mask_batch_FPDM
 from evaluate import get_stats, median_pool, evaluate
-from sample import sample
 
 import matplotlib.pyplot as plt
 from torchvision.utils import save_image, make_grid
@@ -53,7 +52,6 @@ def main():
         args.batch_size,
         split="test",
         mixed=True,
-        training=False,
         seed=args.seed,
         logger=logger,
     )
@@ -75,12 +73,11 @@ def main():
             args.batch_size_val,
             split="val",
             mixed=True,
-            training=False,
             seed=args.seed,
             logger=logger,
         )
         
-    if not args.tuned and args.num_batches_val != 0:
+    if  args.num_batches_val != 0:
         thr_01, abe_min, abe_max = obtain_hyperpara(data_val, diffusion, model, args, dist_util.dev())
         logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
 
@@ -110,7 +107,7 @@ def main():
 
         k += 1
 
-        source, mask, lab = next(data_test)
+        source, mask, lab = data_test.__iter__().__next__()
         Y.append(lab)
 
         logger.log(
@@ -136,7 +133,9 @@ def main():
         model_kwargs0 = {"y": y0, "threshold": -1, "clf_free": True}
 
         # inference
-        minibatch_metrics = diffusion.calc_pred_xstart_loop(
+        
+        # obtain xstart and xstart_null
+        xstarts = diffusion.calc_pred_xstart_loop(
             model,
             source,
             args.w,
@@ -149,39 +148,26 @@ def main():
         )
 
         # collect metrics
-        if not args.tuned:
-            if args.num_batches_val == 0:
-                thr_01 = 0.9968
-                abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
-                abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
-            
-            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
-                minibatch_metrics,
-                source,
-                args.modality,
-                thr_01,
-                abe_min,
-                abe_max,
-                args.image_size,
-                median_filter=args.median_filter,
-                device=dist_util.dev(),
-            )
-        else:
-            # already obtained tuned parameters
-            thr = 0.11
+       
+        if args.num_batches_val == 0:
             thr_01 = 0.9968
-            t_e = torch.tensor([580, 580], device=dist_util.dev())
-            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
-                minibatch_metrics,
-                source,
-                args.modality,
-                thr_01,
-                args.image_size,
-                thr=thr,
-                t_e=t_e,
-                median_filter=args.median_filter,
-                device=dist_util.dev(),
-            )
+            abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
+            abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
+        
+        pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
+            xstarts,
+            source,
+            args.modality,
+            thr_01,
+            abe_min,
+            abe_max,
+            args.image_size,
+            median_filter=args.median_filter,
+            device=dist_util.dev(),
+            last_only=args.last_only,
+            interval=args.subset_interval,
+        )
+       
         PRED_Y.append(pred_lab)
 
         eval_metrics = evaluate(mask, pred_mask, source, pred_map)
@@ -248,7 +234,7 @@ def main():
         if args.save_data:
             logger.log("collecting metrics...")
             for key in all_terms.keys():
-                terms = minibatch_metrics[key]
+                terms = xstarts[key]
                 gathered_terms = [
                     torch.zeros_like(terms) for _ in range(dist.get_world_size())
                 ]
@@ -311,6 +297,8 @@ def create_argparser():
         median_filter=True,
         dynamic_clip=False,
         tuned=False,
+        last_only=False,
+        subset_interval=-1,
         seed=0,  # reproduce
     )
     defaults.update(model_and_diffusion_defaults())

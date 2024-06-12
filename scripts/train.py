@@ -99,11 +99,10 @@ def main():
         split=args.split,
         ret_lab=args.ret_lab,
         logger=logger,
-        training=args.training,
         kwargs=kwargs,
     )
 
-    check_data(data, args.image_dir, name=args.name, split=args.split)
+    check_data(data[0], args.image_dir, name=args.name, split=args.split)
 
     logger.log("training...")
 
@@ -131,6 +130,7 @@ def main():
         sample_fn=sample,
         noise_fn=noise_fn,
         ddpm_sampling=args.ddpm_sampling,
+        total_epochs=args.total_epochs,
     ).run_loop()
 
 
@@ -160,6 +160,7 @@ def create_argparser():
         noise_type="gaussian",
         ddpm_sampling=False,
         unet_ver="v2",
+        total_epochs=100,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
