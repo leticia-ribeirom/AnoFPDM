@@ -18,13 +18,10 @@ from data import get_brats_data_iter
 from evaluate import get_stats, evaluate
 from sample import sample
 
-from obtain_hyperpara import obtain_optimal_threshold, get_mask_for_batch
-from noise import generate_simplex_noise
+from obtain_hyperpara import obtain_optimal_threshold, get_mask_batch
 
-import matplotlib.pyplot as plt
-from torchvision.utils import save_image, make_grid
-import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+
 
 def main():
     args = create_argparser().parse_args()
@@ -34,7 +31,7 @@ def main():
 
     logger.log(f"args: {args}")
     logger.log("starting to sample.")
-    
+
     image_subfolder = args.image_dir
     pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
 
@@ -67,19 +64,11 @@ def main():
         args, args.model_dir, args.model_num, args.ema
     )
 
-    all_sources = []
-    all_latents = []
-    all_targets = []
-    all_masks = []
-    all_pred_maps = []
-
-    
     data_test = get_brats_data_iter(
         args.data_dir,
         args.batch_size,
         split="test",
         mixed=True,
-        training=False,
         seed=args.seed,
         logger=logger,
     )
@@ -99,14 +88,20 @@ def main():
             args.batch_size_val,
             split="val",
             mixed=True,
-            training=False,
             seed=args.seed,
             logger=logger,
         )
 
         opt_thr, dice_max_val = obtain_optimal_threshold(
-            data_val, diffusion, model, args, dist_util.dev(), 
-            guided=False, ddib=False, noise_fn=noise_fn, use_ddpm=args.use_ddpm
+            data_val,
+            diffusion,
+            model,
+            args,
+            dist_util.dev(),
+            guided=False,
+            ddib=False,
+            noise_fn=noise_fn,
+            use_ddpm=args.use_ddpm,
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
 
@@ -125,12 +120,17 @@ def main():
     Y = []
     PRED_Y = []
 
-    
     k = 0
     while k < args.num_batches:
         k += 1
 
-        source, mask, lab = next(data_test)
+        all_sources = []
+        all_latents = []
+        all_targets = []
+        all_masks = []
+        all_pred_maps = []
+
+        source, mask, lab = data_test.__iter__().__next__()
         logger.log(
             f"translating at batch {k} on rank {dist.get_rank()}, shape {source.shape}..."
         )
@@ -163,14 +163,9 @@ def main():
             ddpm=args.use_ddpm,
         )
 
-        if args.num_batches_val == 0 and args.use_ddpm and args.noise_type == "gaussian":
-            opt_thr = 0.43 # 1000 300 
-        if args.num_batches_val == 0 and not args.use_ddpm and args.noise_type == "gaussian":
-            opt_thr = 0.32 # 1000 300
-        if args.noise_type == "simplex":
-            opt_thr = 0.24 # 1000 200
-        
-        pred_mask, pred_map, pred_lab = get_mask_for_batch(source, target, opt_thr, args.modality)
+        pred_mask, pred_map, pred_lab = get_mask_batch(
+            source, target, opt_thr, args.modality
+        )
         PRED_Y.append(pred_lab)
 
         eval_metrics = evaluate(mask, pred_mask, source, pred_map)
@@ -252,7 +247,7 @@ def main():
             gathered_pred_maps = [
                 torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
             ]
-            
+
             dist.all_gather(gathered_source, source)
             dist.all_gather(gathered_latent, noise)
             dist.all_gather(gathered_target, target)
@@ -263,28 +258,29 @@ def main():
             all_latents.extend([noise.cpu().numpy() for noise in gathered_latent])
             all_targets.extend([target.cpu().numpy() for target in gathered_target])
             all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
-            all_pred_maps.extend([pred_map.cpu().numpy() for pred_map in gathered_pred_maps])
+            all_pred_maps.extend(
+                [pred_map.cpu().numpy() for pred_map in gathered_pred_maps]
+            )
 
-    if args.save_data:
-        all_sources = np.concatenate(all_sources, axis=0)
-        all_sources_path = os.path.join(image_subfolder, "source.npy")
-        np.save(all_sources_path, all_sources)
+            all_sources = np.concatenate(all_sources, axis=0)
+            all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
+            np.save(all_sources_path, all_sources)
 
-        all_latents = np.concatenate(all_latents, axis=0)
-        all_latents_path = os.path.join(image_subfolder, "latent.npy")
-        np.save(all_latents_path, all_latents)
+            all_latents = np.concatenate(all_latents, axis=0)
+            all_latents_path = os.path.join(image_subfolder, f"latent_{k}.npy")
+            np.save(all_latents_path, all_latents)
 
-        all_targets = np.concatenate(all_targets, axis=0)
-        all_targets_path = os.path.join(image_subfolder, "target.npy")
-        np.save(all_targets_path, all_targets)
+            all_targets = np.concatenate(all_targets, axis=0)
+            all_targets_path = os.path.join(image_subfolder, f"target_{k}.npy")
+            np.save(all_targets_path, all_targets)
 
-        all_masks = np.concatenate(all_masks, axis=0)
-        all_masks_path = os.path.join(image_subfolder, "mask.npy")
-        np.save(all_masks_path, all_masks)
-        
-        all_pred_maps = np.concatenate(all_pred_maps, axis=0)
-        all_pred_maps_path = os.path.join(image_subfolder, "pred_maps.npy")
-        np.save(all_pred_maps_path, all_pred_maps)
+            all_masks = np.concatenate(all_masks, axis=0)
+            all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
+            np.save(all_masks_path, all_masks)
+
+            all_pred_maps = np.concatenate(all_pred_maps, axis=0)
+            all_pred_maps_path = os.path.join(image_subfolder, f"pred_maps_{k}.npy")
+            np.save(all_pred_maps_path, all_pred_maps)
 
     dist.barrier()
     logger.log(f"synthetic data translation complete")

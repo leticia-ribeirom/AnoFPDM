@@ -14,40 +14,28 @@
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
 
-
-#grp_twu02
-
 module purge
 module load mamba/latest
-
 source activate torch_base
 
-modality=all
-suffix=00
-
-
-# noise_type=simplex
-# ddpm_sampling=True
-noise_type=gaussian
-ddpm_sampling=False
-
+ddpm_sampling=False # ddim or ddpm
 
 in_channels=4
 batch_size=64
 save_interval=5000
 
-
-
 num_classes=2 
 image_size=128
 threshold=0.1
 version=v2
-export OPENAI_LOGDIR="./logs/logs_normal_99_11/logs_guided_${threshold}_${modality}_${suffix}_${version}_${image_size}_clamp"
 
-GUI_FLAGS="--w 1 1.8 2 3 --threshold $threshold"
-
-data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
+# log dir
+export OPENAI_LOGDIR="./logs/clf_free_guided"
+# data dir
+data_dir="/data/preprocessed_data"
 image_dir="$OPENAI_LOGDIR/images"
+
+GUI_FLAGS="--w 1 1.8 2 3 --threshold $threshold" # select w for visual check only
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes --class_cond True --ret_lab True --mixed True"
 
@@ -74,12 +62,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo $MASTER_ADDR
 
-
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo $MASTER_PORT
-
-
-# resume_checkpoint="$OPENAI_LOGDIR/model115000.pt"
 
 NUM_GPUS=2
 torchrun --nproc-per-node $NUM_GPUS \

@@ -17,13 +17,10 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
 )
 
-from data import get_brats_data_iter, check_data
+from data import get_brats_data_iter
 from obtain_hyperpara import obtain_hyperpara, get_mask_batch_FPDM
-from evaluate import get_stats, median_pool, evaluate
+from evaluate import get_stats, evaluate
 
-import matplotlib.pyplot as plt
-from torchvision.utils import save_image, make_grid
-import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 
 
@@ -66,7 +63,7 @@ def main():
     )
 
     logger.log(f"Validation: starting to get threshold and abe range ...")
-    
+
     if args.num_batches_val != 0:
         data_val = get_brats_data_iter(
             args.data_dir,
@@ -76,27 +73,35 @@ def main():
             seed=args.seed,
             logger=logger,
         )
-        
-    if  args.num_batches_val != 0:
-        thr_01, abe_min, abe_max = obtain_hyperpara(data_val, diffusion, model, args, dist_util.dev())
+
+    if args.num_batches_val != 0:
+        thr_01, abe_min, abe_max = obtain_hyperpara(
+            data_val, diffusion, model, args, dist_util.dev()
+        )
+        logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+    else:
+        # model 210000; w = 2; rev_steps = 600
+        thr_01 = 0.9963247179985046
+        abe_min = torch.tensor([0.0006, 0.0003], device=dist_util.dev())
+        abe_max = torch.tensor([0.1254, 0.0964], device=dist_util.dev())
         logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
 
     logger.log(f"starting to inference ...")
 
-    DICE = []
-    DICE_ANO = []
-    IOU = []
-    IOU_ANO = []
-    RECALL = []
-    RECALL_ANO = []
-    PRECISION = []
-    PRECISION_ANO = []
-    AUC = []
-    AUC_ANO = []
-    PR_AUC = []
-    PR_AUC_ANO = []
-    Y = []
-    PRED_Y = []
+    DICE = [[] for _ in range(len(args.t_e_ratio))]
+    DICE_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    IOU = [[] for _ in range(len(args.t_e_ratio))]
+    IOU_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    RECALL = [[] for _ in range(len(args.t_e_ratio))]
+    RECALL_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    PRECISION = [[] for _ in range(len(args.t_e_ratio))]
+    PRECISION_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    AUC = [[] for _ in range(len(args.t_e_ratio))]
+    AUC_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    PR_AUC = [[] for _ in range(len(args.t_e_ratio))]
+    PR_AUC_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    Y = [[] for _ in range(len(args.t_e_ratio))]
+    PRED_Y = [[] for _ in range(len(args.t_e_ratio))]
 
     k = 0
     while k < args.num_batches:
@@ -108,7 +113,6 @@ def main():
         k += 1
 
         source, mask, lab = data_test.__iter__().__next__()
-        Y.append(lab)
 
         logger.log(
             f"translating at batch {k} on rank {dist.get_rank()}, shape {source.shape}..."
@@ -133,7 +137,7 @@ def main():
         model_kwargs0 = {"y": y0, "threshold": -1, "clf_free": True}
 
         # inference
-        
+
         # obtain xstart and xstart_null
         xstarts = diffusion.calc_pred_xstart_loop(
             model,
@@ -148,132 +152,139 @@ def main():
         )
 
         # collect metrics
-       
-        if args.num_batches_val == 0:
-            thr_01 = 0.9968
-            abe_min = torch.tensor([0.0021, 0.0018], device=dist_util.dev())
-            abe_max = torch.tensor([0.1648, 0.1335], device=dist_util.dev())
-        
-        pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
-            xstarts,
-            source,
-            args.modality,
-            thr_01,
-            abe_min,
-            abe_max,
-            args.image_size,
-            median_filter=args.median_filter,
-            device=dist_util.dev(),
-            last_only=args.last_only,
-            interval=args.subset_interval,
-        )
-       
-        PRED_Y.append(pred_lab)
+        for n, ratio in enumerate(args.t_e_ratio):
+            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
+                xstarts,
+                source,
+                args.modality,
+                thr_01,
+                abe_min,
+                abe_max,
+                args.image_size,
+                median_filter=args.median_filter,
+                device=dist_util.dev(),
+                t_e_ratio=ratio,
+                last_only=args.last_only,
+                interval=args.subset_interval,
+            )
 
-        eval_metrics = evaluate(mask, pred_mask, source, pred_map)
-        eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
-        cls_metrics = get_stats(Y, PRED_Y)
+            Y[n].append(lab)
+            PRED_Y[n].append(pred_lab)
 
-        DICE.append(eval_metrics["dice"])
-        DICE_ANO.append(eval_metrics_ano["dice"])
+            eval_metrics = evaluate(mask, pred_mask, source, pred_map)
+            eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
+            cls_metrics = get_stats(Y[n], PRED_Y[n])
 
-        IOU.append(eval_metrics["iou"])
-        IOU_ANO.append(eval_metrics_ano["iou"])
+            DICE[n].append(eval_metrics["dice"])
+            DICE_ANO[n].append(eval_metrics_ano["dice"])
 
-        RECALL.append(eval_metrics["recall"])
-        RECALL_ANO.append(eval_metrics_ano["recall"])
+            IOU[n].append(eval_metrics["iou"])
+            IOU_ANO[n].append(eval_metrics_ano["iou"])
 
-        PRECISION.append(eval_metrics["precision"])
-        PRECISION_ANO.append(eval_metrics_ano["precision"])
+            RECALL[n].append(eval_metrics["recall"])
+            RECALL_ANO[n].append(eval_metrics_ano["recall"])
 
-        AUC.append(eval_metrics["AUC"])
-        AUC_ANO.append(eval_metrics_ano["AUC"])
+            PRECISION[n].append(eval_metrics["precision"])
+            PRECISION_ANO[n].append(eval_metrics_ano["precision"])
 
-        PR_AUC.append(eval_metrics["PR_AUC"])
-        PR_AUC_ANO.append(eval_metrics_ano["PR_AUC"])
+            AUC[n].append(eval_metrics["AUC"])
+            AUC_ANO[n].append(eval_metrics_ano["AUC"])
 
-        logger.log(
-            f"-------------------------------------at batch {k}-----------------------------------------"
-        )
-        logger.log(f"mean dice: {eval_metrics['dice']:0.3f}")
-        logger.log(f"mean iou: {eval_metrics['iou']:0.3f}")
-        logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
-        logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
-        logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
-        logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
+            PR_AUC[n].append(eval_metrics["PR_AUC"])
+            PR_AUC_ANO[n].append(eval_metrics_ano["PR_AUC"])
 
-        logger.log(
-            "-------------------------------------------------------------------------------------------"
-        )
-        logger.log(f"running dice: {np.mean(DICE):0.3f}")  # keep 3 decimals
-        logger.log(f"running iou: {np.mean(IOU):0.3f}")
-        logger.log(f"running precision: {np.mean(PRECISION):0.3f}")
-        logger.log(f"running recall: {np.mean(RECALL):0.3f}")
-        logger.log(f"running auc: {np.mean(AUC):0.3f}")
-        logger.log(f"running pr auc: {np.mean(PR_AUC):0.3f}")
-        logger.log(
-            "-------------------------------------------------------------------------------------------"
-        )
-        logger.log(f"running dice ano: {np.mean(DICE_ANO):0.3f}")
-        logger.log(f"running iou ano: {np.mean(IOU_ANO):0.3f}")
-        logger.log(f"running precision ano: {np.mean(PRECISION_ANO):0.3f}")
-        logger.log(f"running recall ano: {np.mean(RECALL_ANO):0.3f}")
-        logger.log(f"running auc ano: {np.mean(AUC_ANO):0.3f}")
-        logger.log(f"running pr auc ano: {np.mean(PR_AUC_ANO):0.3f}")
-        logger.log(
-            "-------------------------------------------------------------------------------------------"
-        )
-        logger.log(f"running cls acc: {cls_metrics['acc']:0.3f}")
-        logger.log(f"running cls recall: {cls_metrics['recall']:0.3f}")
-        logger.log(f"running cls precision: {cls_metrics['precision']:0.3f}")
-        logger.log(f"running cls num_ano: {cls_metrics['num_ano']}")
-        logger.log(
-            "-------------------------------------------------------------------------------------------"
-        )
+            logger.log(
+                f"-------------------------------------at batch {k}-----------------------------------------"
+            )
+            logger.log(f"mean dice: {eval_metrics['dice']:0.3f}")
+            logger.log(f"mean iou: {eval_metrics['iou']:0.3f}")
+            logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
+            logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
+            logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
+            logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
+            logger.log(f"ratio: {ratio}")
 
-        if args.save_data:
-            logger.log("collecting metrics...")
-            for key in all_terms.keys():
-                terms = xstarts[key]
-                gathered_terms = [
-                    torch.zeros_like(terms) for _ in range(dist.get_world_size())
+            logger.log(
+                "-------------------------------------------------------------------------------------------"
+            )
+            logger.log(f"running dice: {np.mean(DICE[n]):0.3f}")  # keep 3 decimals
+            logger.log(f"running iou: {np.mean(IOU[n]):0.3f}")
+            logger.log(f"running precision: {np.mean(PRECISION[n]):0.3f}")
+            logger.log(f"running recall: {np.mean(RECALL[n]):0.3f}")
+            logger.log(f"running auc: {np.mean(AUC[n]):0.3f}")
+            logger.log(f"running pr auc: {np.mean(PR_AUC[n]):0.3f}")
+            logger.log(f"ratio: {ratio}")
+            logger.log(
+                "-------------------------------------------------------------------------------------------"
+            )
+            logger.log(f"running dice ano: {np.mean(DICE_ANO[n]):0.3f}")
+            logger.log(f"running iou ano: {np.mean(IOU_ANO[n]):0.3f}")
+            logger.log(f"running precision ano: {np.mean(PRECISION_ANO[n]):0.3f}")
+            logger.log(f"running recall ano: {np.mean(RECALL_ANO[n]):0.3f}")
+            logger.log(f"running auc ano: {np.mean(AUC_ANO[n]):0.3f}")
+            logger.log(f"running pr auc ano: {np.mean(PR_AUC_ANO[n]):0.3f}")
+            logger.log(f"ratio: {ratio}")
+            logger.log(
+                "-------------------------------------------------------------------------------------------"
+            )
+            logger.log(f"running cls acc: {cls_metrics['acc']:0.3f}")
+            logger.log(f"running cls recall: {cls_metrics['recall']:0.3f}")
+            logger.log(f"running cls precision: {cls_metrics['precision']:0.3f}")
+            logger.log(f"running cls num_ano: {cls_metrics['num_ano']}")
+            logger.log(f"ratio: {ratio}")
+            logger.log(
+                "-------------------------------------------------------------------------------------------"
+            )
+
+            if args.save_data:
+                logger.log("collecting metrics...")
+                for key in all_terms.keys():
+                    terms = xstarts[key]
+                    gathered_terms = [
+                        torch.zeros_like(terms) for _ in range(dist.get_world_size())
+                    ]
+                    dist.all_gather(gathered_terms, terms)
+                    all_terms[key].extend(
+                        [term.cpu().numpy() for term in gathered_terms]
+                    )
+
+                gathered_source = [
+                    torch.zeros_like(source) for _ in range(dist.get_world_size())
                 ]
-                dist.all_gather(gathered_terms, terms)
-                all_terms[key].extend([term.cpu().numpy() for term in gathered_terms])
+                gathered_mask = [
+                    torch.zeros_like(mask) for _ in range(dist.get_world_size())
+                ]
+                gathered_pred_map = [
+                    torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
+                ]
 
-            gathered_source = [
-                torch.zeros_like(source) for _ in range(dist.get_world_size())
-            ]
-            gathered_mask = [
-                torch.zeros_like(mask) for _ in range(dist.get_world_size())
-            ]
-            gathered_pred_map = [
-                torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
-            ]
-            
-            dist.all_gather(gathered_source, source)
-            dist.all_gather(gathered_mask, mask)
-            dist.all_gather(gathered_pred_map, pred_map)
-            
-            all_sources.extend([source.cpu().numpy() for source in gathered_source])
-            all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
-            all_pred_maps.extend([pred_map.cpu().numpy() for pred_map in gathered_pred_map])
-            
-            all_sources = np.concatenate(all_sources, axis=0)
-            all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
-            np.save(all_sources_path, all_sources)
+                dist.all_gather(gathered_source, source)
+                dist.all_gather(gathered_mask, mask)
+                dist.all_gather(gathered_pred_map, pred_map)
 
-            all_masks = np.concatenate(all_masks, axis=0)
-            all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
-            np.save(all_masks_path, all_masks)
-            
-            all_pred_maps = np.concatenate(all_pred_maps, axis=0)
-            all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
-            np.save(all_pred_maps_path, all_pred_maps)
+                all_sources.extend([source.cpu().numpy() for source in gathered_source])
+                all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
+                all_pred_maps.extend(
+                    [pred_map.cpu().numpy() for pred_map in gathered_pred_map]
+                )
 
-            for key in all_terms.keys():
-                all_terms_path = os.path.join(logger.get_dir(), f"{key}_terms_{k}.npy")
-                np.save(all_terms_path, all_terms[key])
+                all_sources = np.concatenate(all_sources, axis=0)
+                all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
+                np.save(all_sources_path, all_sources)
+
+                all_masks = np.concatenate(all_masks, axis=0)
+                all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
+                np.save(all_masks_path, all_masks)
+
+                all_pred_maps = np.concatenate(all_pred_maps, axis=0)
+                all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
+                np.save(all_pred_maps_path, all_pred_maps)
+
+                for key in all_terms.keys():
+                    all_terms_path = os.path.join(
+                        logger.get_dir(), f"{key}_terms_{k}.npy"
+                    )
+                    np.save(all_terms_path, all_terms[key])
 
     dist.barrier()
 
@@ -309,9 +320,14 @@ def create_argparser():
         type=int,
         nargs="+",
         help="0:flair, 1:t1, 2:t1ce, 3:t2",
-        default=0.0,  # flair as default
+        default=[0, 3],  # flair as default
     )
-
+    parser.add_argument(
+        "--t_e_ratio",
+        type=float,
+        nargs="+",
+        default=[1],
+    )
     parser.add_argument(
         "--w",
         type=float,

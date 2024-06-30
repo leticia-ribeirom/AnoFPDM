@@ -15,36 +15,25 @@
 #SBATCH -o ./slurm_out/slurm.%j.out
 
 
-#grp_twu02
-
 module purge
 module load mamba/latest
 source activate torch_base
 
-modality=all
-suffix=00
 
-noise_type=simplex
-# noise_type=gaussian
+# noise_type=simplex
+noise_type=gaussian
 
-if [ "$modality" == "all" ]; then
-    in_channels=4
-    batch_size=32
-    save_interval=10000
-elif [ "$modality" == "flair" ]; then
-    in_channels=1
-    batch_size=64
-    save_interval=10000
-fi
+in_channels=4
+batch_size=32
+save_interval=10000
 
-
-num_classes=0
+num_classes=0 # unguided
 image_size=128
 
-export OPENAI_LOGDIR="./logs_normal_99_11/logs_unguided_${modality}_${suffix}_v1_${image_size}_anoddpm_${noise_type}_2"
-
-
-data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
+# log directory
+export OPENAI_LOGDIR="./logs/anoddpm_${noise_type}"
+# data directory
+data_dir="/data/preprocessed_data"
 image_dir="$OPENAI_LOGDIR/images"
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes \
@@ -70,8 +59,8 @@ TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_siz
 EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size \
             --timestep_respacing ddim1000" # ignore this for non-gaussian noise and we use ddpm sampling for visual checking
 
-resume_checkpoint="$OPENAI_LOGDIR/model310000.pt"
 
+# slurm setup
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo $MASTER_ADDR

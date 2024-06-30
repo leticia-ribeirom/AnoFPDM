@@ -42,26 +42,21 @@ echo $MASTER_PORT
 
 
 diffusion_steps=1000
-model_num=500000
-clf_num=149999
+model_num=500000 # model steps
+clf_num=149999 # classifier steps
 
-for round in 1
+for round in 1 # for multiple runs to get error bars
 do
-    for sample_steps in 200
+    for sample_steps in 200 # you can change this to other values in validation set (grid search)
     do  
-        for classifier_scale in 1000
+        for classifier_scale in 1000 # you can change this to other values in validation set (grid search)
         do
-            # export OPENAI_LOGDIR="./logs_samples/eva_${diffusion_steps}_${sample_steps}_${classifier_scale}_${model_num}_clf_${round}"
-            export OPENAI_LOGDIR="./logs_test/eva_${diffusion_steps}_${sample_steps}_${classifier_scale}_${model_num}_clf_${round}"
+            export OPENAI_LOGDIR="./logs/translation_clf_guided_${round}_${sample_steps}_${classifier_scale}"
             echo $OPENAI_LOGDIR
             
-            # data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
-            # model_dir="./logs_normal_99_11/logs_clf_guided_${modality}_${suffix}_${version}_${image_size}"
-            # classifier_dir="./logs_normal_99_11/logs_clf_${version}_${image_size}"
-
-            data_dir="/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
-            model_dir="./trained_weights/clf-guided"
-            classifier_dir="./trained_weights/clf"
+            data_dir="/data/preprocessed_data"
+            model_dir="./logs/clf_guided"
+            classifier_dir="./logs/clf"
 
             image_dir="$OPENAI_LOGDIR"
 
@@ -80,8 +75,8 @@ do
                                 --classifier_resblock_updown True\
                                 --classifier_use_scale_shift_norm True"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 5\
-                        --batch_size_val 100 --num_batches_val 0\
+            DATA_FLAGS="--batch_size 100 --num_batches 100\
+                        --batch_size_val 100 --num_batches_val 10\
                         --modality 0 3"
 
 
@@ -91,7 +86,7 @@ do
                                 --rescale_learned_sigmas False\
                                 --rescale_timesteps False"
 
-            DIR_FLAGS="--save_data False --data_dir $data_dir\
+            DIR_FLAGS="--save_data True --data_dir $data_dir\
                         --image_dir $image_dir --model_dir $model_dir"
 
 

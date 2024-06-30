@@ -1,9 +1,8 @@
 __pycache__/
 
 *.DS_store
-run_preprocess.sh
 run_train_cifar*.sh
-run_translation_anoddpm.sh
+run_translation_fpdm_random.sh
 
 *.out
 *.err
@@ -15,3 +14,5 @@ test*
 /kl_test/
 preprocess_t1.py
 /trained_weights/
+/abl*/
+/figs/

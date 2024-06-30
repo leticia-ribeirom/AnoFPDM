@@ -124,6 +124,7 @@ def get_mask_batch_FPDM(
     device,
     thr = None,
     t_e = None,
+    t_e_ratio = 1,
     median_filter=True,
     last_only=False,
     interval=-1,
@@ -180,7 +181,9 @@ def get_mask_batch_FPDM(
         t_s_i = torch.tensor([0, 0], device=device)
         t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
         
-        
+        if t_e_ratio != 1:
+            t_e_i = torch.round(t_e_i * t_e_ratio).to(torch.int64)
+            
         if last_only:
             t_s_i = t_e_i - 1
             assert interval == -1 # no interval for last_only
@@ -226,7 +229,7 @@ def get_mask_batch_FPDM(
 
 
 
-# %% for non-dynamical threshold to obtain pred_mask
+# %% For non-dynamical threshold to obtain pred_mask (other comparison methods)
 def get_mask_batch(source, target, threshold, mod, median_filter=True):
     abe_sum = (
         (source[:, mod, ...] - target[:, mod, ...]).abs().mean(dim=1, keepdims=True)
@@ -261,7 +264,7 @@ def obtain_optimal_threshold(
     SOURCE = []
     MASK = []
     for i in range(args.num_batches_val):
-        source_val, mask_val, _ = next(data_val)
+        source_val, mask_val, _ = data_val.__iter__().__next__()
         source_val = source_val.to(device)
         mask_val = mask_val.to(device)
 

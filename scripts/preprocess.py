@@ -150,12 +150,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
-    # parser.add_argument("--name", default='brats', type=str, help="dataset name")
-    #  parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
-    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/mmbrain/data', type=str, help="path to Data directory")
-    parser.add_argument("--name", default='mmbrain', type=str, help="dataset name")
+    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
+    parser.add_argument("--name", default='brats', type=str, help="dataset name")
     parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
+    
+    
     
     
     parser.add_argument("--pre", default=0, 

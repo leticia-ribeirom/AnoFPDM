@@ -11,19 +11,17 @@ from guided_diffusion import dist_util, logger
 from guided_diffusion.script_util import (
     model_and_diffusion_defaults,
     add_dict_to_argparser,
-    classifier_defaults
+    classifier_defaults,
 )
 
 from data import get_brats_data_iter
 
-from evaluate import get_stats, median_pool, evaluate
+from evaluate import get_stats, evaluate
 from sample import sample
 
-import matplotlib.pyplot as plt
-from torchvision.utils import save_image, make_grid
 import torch.nn.functional as F
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from obtain_hyperpara import get_mask_for_batch, obtain_optimal_threshold
+from obtain_hyperpara import get_mask_batch, obtain_optimal_threshold
 
 
 def main():
@@ -32,7 +30,6 @@ def main():
     dist_util.setup_dist()
     logger.configure()
     logger.log(f"args: {args}")
-    
 
     image_subfolder = args.image_dir
     pathlib.Path(image_subfolder).mkdir(parents=True, exist_ok=True)
@@ -55,44 +52,39 @@ def main():
         with torch.enable_grad():
             x_in = x.detach().requires_grad_(True)
             logits = classifier(x_in, t)
-            log_probs = F.log_softmax(logits, dim=-1) # 100x2
-            selected = log_probs[range(len(logits)), y.view(-1)] # 100
-            a = torch.autograd.grad(selected.sum(), x_in)[0] # 100x4x128x128
+            log_probs = F.log_softmax(logits, dim=-1)  # 100x2
+            selected = log_probs[range(len(logits)), y.view(-1)]  # 100
+            a = torch.autograd.grad(selected.sum(), x_in)[0]  # 100x4x128x128
             return a * args.classifier_scale
-
-    all_sources = []
-    all_latents = []
-    all_targets = []
-    all_masks = []
-    all_pred_maps = []
-
-    
 
     data_test = get_brats_data_iter(
         args.data_dir,
         args.batch_size,
         split="test",
         mixed=True,
-        training=False,
         seed=args.seed,
         logger=logger,
     )
-    
+
     if args.num_batches_val != 0:
         data_val = get_brats_data_iter(
             args.data_dir,
             args.batch_size_val,
             split="val",
             mixed=True,
-            training=False,
             seed=args.seed,
             logger=logger,
         )
         opt_thr, dice_max_val = obtain_optimal_threshold(
-            data_val, diffusion, model, args, dist_util.dev(), ddib=False, cond_fn=cond_fn
+            data_val,
+            diffusion,
+            model,
+            args,
+            dist_util.dev(),
+            ddib=False,
+            cond_fn=cond_fn,
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
-   
 
     DICE = []
     DICE_ANO = []
@@ -113,7 +105,13 @@ def main():
     while k < args.num_batches:
         k += 1
 
-        source, mask, lab = next(data_test)
+        all_sources = []
+        all_latents = []
+        all_targets = []
+        all_masks = []
+        all_pred_maps = []
+
+        source, mask, lab = data_test.__iter__().__next__()
         logger.log(
             f"translating at batch {k} on rank {dist.get_rank()}, shape {source.shape}..."
         )
@@ -150,10 +148,11 @@ def main():
             sample_steps=args.sample_steps,
             normalize_img=False,
         )
-        
+
         if args.num_batches_val == 0:
-            opt_thr = 0.24 # for optimal setup
-        pred_mask, pred_map, pred_lab = get_mask_for_batch(
+            opt_thr = 0.24  # for optimal setup
+
+        pred_mask, pred_map, pred_lab = get_mask_batch(
             source, target, opt_thr, args.modality, median_filter=True
         )
         PRED_Y.append(pred_lab)
@@ -243,33 +242,34 @@ def main():
             dist.all_gather(gathered_target, target)
             dist.all_gather(gathered_mask, mask)
             dist.all_gather(gathered_pred_map, pred_map)
-            
-    if args.save_data:
-        all_sources.extend([source.cpu().numpy() for source in gathered_source])
-        all_latents.extend([noise.cpu().numpy() for noise in gathered_latent])
-        all_targets.extend([target.cpu().numpy() for target in gathered_target])
-        all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
-        all_pred_maps.extend([pred_map.cpu().numpy() for pred_map in gathered_pred_map])
 
-        all_sources = np.concatenate(all_sources, axis=0)
-        all_sources_path = os.path.join(image_subfolder, "source.npy")
-        np.save(all_sources_path, all_sources)
+            all_sources.extend([source.cpu().numpy() for source in gathered_source])
+            all_latents.extend([noise.cpu().numpy() for noise in gathered_latent])
+            all_targets.extend([target.cpu().numpy() for target in gathered_target])
+            all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
+            all_pred_maps.extend(
+                [pred_map.cpu().numpy() for pred_map in gathered_pred_map]
+            )
 
-        all_latents = np.concatenate(all_latents, axis=0)
-        all_latents_path = os.path.join(image_subfolder, "latent.npy")
-        np.save(all_latents_path, all_latents)
+            all_sources = np.concatenate(all_sources, axis=0)
+            all_sources_path = os.path.join(image_subfolder, f"source_{k}.npy")
+            np.save(all_sources_path, all_sources)
 
-        all_targets = np.concatenate(all_targets, axis=0)
-        all_targets_path = os.path.join(image_subfolder, "target.npy")
-        np.save(all_targets_path, all_targets)
+            all_latents = np.concatenate(all_latents, axis=0)
+            all_latents_path = os.path.join(image_subfolder, f"latent_{k}.npy")
+            np.save(all_latents_path, all_latents)
 
-        all_masks = np.concatenate(all_masks, axis=0)
-        all_masks_path = os.path.join(image_subfolder, "mask.npy")
-        np.save(all_masks_path, all_masks)
-        
-        all_pred_maps = np.concatenate(all_pred_maps, axis=0)
-        all_pred_maps_path = os.path.join(image_subfolder, "pred_map.npy")
-        np.save(all_pred_maps_path, all_pred_maps)
+            all_targets = np.concatenate(all_targets, axis=0)
+            all_targets_path = os.path.join(image_subfolder, f"target_{k}.npy")
+            np.save(all_targets_path, all_targets)
+
+            all_masks = np.concatenate(all_masks, axis=0)
+            all_masks_path = os.path.join(image_subfolder, f"mask_{k}.npy")
+            np.save(all_masks_path, all_masks)
+
+            all_pred_maps = np.concatenate(all_pred_maps, axis=0)
+            all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
+            np.save(all_pred_maps_path, all_pred_maps)
 
     dist.barrier()
     logger.log(f"synthetic data translation complete")
@@ -280,7 +280,7 @@ def create_argparser():
         data_dir="",
         image_dir="",
         model_dir="",  # model directory,
-        clf_dir="", # classifier directory
+        clf_dir="",  # classifier directory
         seed=0,
         batch_size=32,
         sample_steps=1000,

@@ -19,18 +19,10 @@ module purge
 module load mamba/latest
 source activate torch_base
 
-
-modality=all
-suffix=00
 num_classes=2
 image_size=128
 version=v1
-
-if [ "$modality" == "all" ]; then
-    in_channels=4
-elif [ "$modality" == "flair" ]; then
-    in_channels=1
-fi
+in_channels=4
 
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
@@ -40,13 +32,12 @@ echo $MASTER_ADDR
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo $MASTER_PORT
 
-
-export OPENAI_LOGDIR="./logs_normal_99_11/logs_clf_${version}_${image_size}"
+export OPENAI_LOGDIR="./logs/clf"
 echo $OPENAI_LOGDIR
 
 image_dir="$OPENAI_LOGDIR/images"
 
-data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
+data_dir="/data/preprocessed_data"
 
 
 CLASSIFIER_FLAGS="--unet_ver $version --image_size $image_size --classifier_attention_resolutions 32,16,8 \
@@ -56,7 +47,6 @@ CLASSIFIER_FLAGS="--unet_ver $version --image_size $image_size --classifier_atte
                 --classifier_resblock_updown True --classifier_use_scale_shift_norm True\
                 --data_dir $data_dir --image_dir $image_dir --batch_size 64 --iterations 250000"
 
-resume_checkpoint="$OPENAI_LOGDIR/model149999.pt"
 NUM_GPUS=1
 torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\

@@ -93,7 +93,6 @@ def main():
         split="train",
         ret_lab=True,
         logger=logger,
-        training=True,
         kwargs=kwargs,
     )
 
@@ -104,7 +103,6 @@ def main():
         split="val",
         ret_lab=True,
         logger=logger,
-        training=True,
         kwargs=kwargs,
     )
 

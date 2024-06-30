@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name='learn_sigma'
+#SBATCH --job-name='clf_guided'
 #SBATCH --nodes=1                    
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=2
@@ -15,33 +15,24 @@
 #SBATCH -o ./slurm_out/slurm.%j.out
 
 
-#grp_twu02
-
 module purge
 module load mamba/latest
-
 source activate torch_base
 
-modality=all
-suffix=00
 
-if [ "$modality" == "all" ]; then
-    in_channels=4
-    batch_size=32
-    save_interval=10000
-elif [ "$modality" == "flair" ]; then
-    in_channels=1
-    batch_size=64
-    save_interval=10000
-fi
-
-num_classes=2 
+in_channels=4
+batch_size=32
+save_interval=10000
+num_classes=2 # healthy or unhealthy
 image_size=128
-version=v1
-export OPENAI_LOGDIR="./logs_normal_99_11/logs_clf_guided_${modality}_${suffix}_${version}_${image_size}"
+version=v1 # unet version
 
+# log directory
+export OPENAI_LOGDIR="./logs/clf_guided"
 
-data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
+# data directory
+data_dir="/data/preprocessed_data"
+# saved images directory, visual check
 image_dir="$OPENAI_LOGDIR/images"
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes --class_cond True --ret_lab True --mixed True"
@@ -64,16 +55,15 @@ EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_
                 --timestep_respacing ddim1000"
 
 
+# slurm setup
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo $MASTER_ADDR
 
-
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo $MASTER_PORT
 
-resume_checkpoint="$OPENAI_LOGDIR/model330000.pt"
-NUM_GPUS=1
+NUM_GPUS=2
 torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\
          --rdzv-backend=c10d\

@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public 
             
-#SBATCH -t 00-05:00:00               
+#SBATCH -t 00-01:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -20,23 +20,12 @@ module load mamba/latest
 source activate torch_base
 
 
-modality=all
-suffix=00
 threshold=0.1 # for model trained with p=0.1
 image_size=128
-
 w_reverse=-1
 num_classes=2
-
-if [ "$modality" == "all" ]; then
-    in_channels=4
-    num_channels=128
-elif [ "$modality" == "flair" ]; then
-    in_channels=1
-    num_channels=128
-fi
-
-
+in_channels=4
+num_channels=128
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -52,18 +41,15 @@ version=v2
 
 for model_num in 210000
 do
-    for w in 1.1 1.5
+    for w in 1.1 # you can change this to other values in validation set (grid search)
     do
-        for sample_steps in 450
+        for sample_steps in 450 # you can change this to other values in validation set (grid search)
         do
-            # export OPENAI_LOGDIR="./logs_samples/eva_${diffusion_steps}_${sample_steps}_${w}_${version}_${model_num}_ddib"
             
-            export OPENAI_LOGDIR="./logs_test/eva_${diffusion_steps}_${sample_steps}_${w}_${version}_${model_num}_ddib_mmbrain"
+            export OPENAI_LOGDIR="./logs/translation_ddib_${w}_${sample_steps}_${model_num}"
             echo $OPENAI_LOGDIR
-            # data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_${modality}_${suffix}_${image_size}"
-            # model_dir="./logs_normal_99_11/logs_guided_${threshold}_${modality}_${suffix}_${version}_${image_size}"
-            data_dir="/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
-            model_dir="./trained_weights"
+            data_dir="/data/preprocessed_data"
+            model_dir="./logs/clf_free_guided"
            
             image_dir="$OPENAI_LOGDIR"
 
@@ -73,8 +59,8 @@ do
                             --num_channels $num_channels --model_num $model_num --ema True\
                             --learn_sigma False"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 5\
-                        --batch_size_val 100 --num_batches_val 0\
+            DATA_FLAGS="--batch_size 100 --num_batches 100\
+                        --batch_size_val 100 --num_batches_val 10\
                         --modality 0 3"
 
 
@@ -90,12 +76,11 @@ do
 
 
             NUM_GPUS=1
-            # torchrun --nproc-per-node $NUM_GPUS\
-            #             --nnodes=1\
-            #             --rdzv-backend=c10d\
-            #             --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-            #         ./scripts/translation_DDIB.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
-            torchrun ./scripts/translation_DDIB.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
+            torchrun --nproc-per-node $NUM_GPUS\
+                        --nnodes=1\
+                        --rdzv-backend=c10d\
+                        --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
+                    ./scripts/translation_DDIB.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
         done
     done
 done
