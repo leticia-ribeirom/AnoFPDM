@@ -16,3 +16,5 @@ preprocess_t1.py
 /trained_weights/
 /abl*/
 /figs/
+/.vscode/
+/figs/
