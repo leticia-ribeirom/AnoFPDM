@@ -1,6 +1,6 @@
-# AnoFPDM
+# Pytorch implementation of AnoFPDM
 
-Pytorch implementation of our work [AnoFPDM: Anomaly Segmentation with Forward Process of Diffusion Models for Brain MRI](https://arxiv.org/abs/2404.15683)
+ [AnoFPDM: Anomaly Segmentation with Forward Process of Diffusion Models for Brain MRI](https://arxiv.org/abs/2404.15683)
 
 [Yiming Che](https://soloche.github.io/)<sup>1,2</sup>, 
 [Fazle Rafsani](https://labs.engineering.asu.edu/wulab/person/fazle-rafsani/)<sup>1,2</sup>, 
