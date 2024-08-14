@@ -17,7 +17,7 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
 )
 
-from data import get_brats_data_iter
+from data import get_data_iter
 from obtain_hyperpara import obtain_hyperpara, get_mask_batch_FPDM
 from evaluate import get_stats, evaluate
 
@@ -44,13 +44,16 @@ def main():
         args, args.model_dir, args.model_num, args.ema
     )
 
-    data_test = get_brats_data_iter(
+    data_test = get_data_iter(
+        args.name,
         args.data_dir,
-        args.batch_size,
-        split="test",
         mixed=True,
+        batch_size=args.batch_size,
+        split="test",
         seed=args.seed,
         logger=logger,
+        use_weighted_sampler=args.use_weighted_sampler,
+        
     )
 
     model = DDP(
@@ -65,26 +68,35 @@ def main():
     logger.log(f"Validation: starting to get threshold and abe range ...")
 
     if args.num_batches_val != 0:
-        data_val = get_brats_data_iter(
+        data_val = get_data_iter(
+            args.name,
             args.data_dir,
-            args.batch_size_val,
-            split="val",
             mixed=True,
+            batch_size=args.batch_size_val,
+            split="val",
             seed=args.seed,
             logger=logger,
+            use_weighted_sampler=args.use_weighted_sampler,
         )
 
-    if args.num_batches_val != 0:
         thr_01, abe_min, abe_max = obtain_hyperpara(
             data_val, diffusion, model, args, dist_util.dev()
         )
         logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
     else:
-        # model 210000; w = 2; rev_steps = 600
-        thr_01 = 0.9963247179985046
-        abe_min = torch.tensor([0.0006, 0.0003], device=dist_util.dev())
-        abe_max = torch.tensor([0.1254, 0.0964], device=dist_util.dev())
-        logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+        logger.log(f"loading hyperparameters for {args.name} ...")
+        if args.name == "brats":
+            # model 210000; w = 2; rev_steps = 600
+            thr_01 = 0.9963247179985046
+            abe_min = torch.tensor([0.0006, 0.0003], device=dist_util.dev())
+            abe_max = torch.tensor([0.1254, 0.0964], device=dist_util.dev())
+            logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+        elif args.name == "atlas":
+            # model 290000; w = 1.5; rev_steps = 600
+            thr_01 = 0.9877627491950989
+            abe_min = torch.tensor([0.0024], device=dist_util.dev())
+            abe_max = torch.tensor([0.1162], device=dist_util.dev())
+            logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
 
     logger.log(f"starting to inference ...")
 
@@ -109,6 +121,7 @@ def main():
         all_masks = []
         all_pred_maps = []
         all_terms = {"xstart_null": [], "xstart": []}
+        all_pred_masks_all = []
 
         k += 1
 
@@ -153,7 +166,7 @@ def main():
 
         # collect metrics
         for n, ratio in enumerate(args.t_e_ratio):
-            pred_mask, pred_lab, pred_map = get_mask_batch_FPDM(
+            pred_mask, pred_mask_all, pred_lab, pred_map = get_mask_batch_FPDM(
                 xstarts,
                 source,
                 args.modality,
@@ -172,7 +185,7 @@ def main():
             PRED_Y[n].append(pred_lab)
 
             eval_metrics = evaluate(mask, pred_mask, source, pred_map)
-            eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
+            eval_metrics_ano = evaluate(mask, pred_mask_all, source, pred_map, lab)
             cls_metrics = get_stats(Y[n], PRED_Y[n])
 
             DICE[n].append(eval_metrics["dice"])
@@ -203,7 +216,16 @@ def main():
             logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
             logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
             logger.log(f"ratio: {ratio}")
-
+            logger.log(
+                "-------------------------------------------------------------------------------------------"
+            )
+            logger.log(f"mean dice ano: {eval_metrics_ano['dice']:0.3f}")
+            logger.log(f"mean iou ano: {eval_metrics_ano['iou']:0.3f}")
+            logger.log(f"mean precision ano: {eval_metrics_ano['precision']:0.3f}")
+            logger.log(f"mean recall ano: {eval_metrics_ano['recall']:0.3f}")
+            logger.log(f"mean auc ano: {eval_metrics_ano['AUC']:0.3f}")
+            logger.log(f"mean pr auc ano: {eval_metrics_ano['PR_AUC']:0.3f}")
+            logger.log(f"ratio: {ratio}")
             logger.log(
                 "-------------------------------------------------------------------------------------------"
             )
@@ -257,15 +279,24 @@ def main():
                 gathered_pred_map = [
                     torch.zeros_like(pred_map) for _ in range(dist.get_world_size())
                 ]
+                gathered_pred_masks_all = [
+                    torch.zeros_like(pred_mask_all)
+                    for _ in range(dist.get_world_size())
+                ]
+                
 
                 dist.all_gather(gathered_source, source)
                 dist.all_gather(gathered_mask, mask)
                 dist.all_gather(gathered_pred_map, pred_map)
+                dist.all_gather(gathered_pred_masks_all, pred_mask_all)
 
                 all_sources.extend([source.cpu().numpy() for source in gathered_source])
                 all_masks.extend([mask.cpu().numpy() for mask in gathered_mask])
                 all_pred_maps.extend(
                     [pred_map.cpu().numpy() for pred_map in gathered_pred_map]
+                )
+                all_pred_masks_all.extend(
+                    [pred_mask_all.cpu().numpy() for pred_mask_all in gathered_pred_masks_all]
                 )
 
                 all_sources = np.concatenate(all_sources, axis=0)
@@ -279,6 +310,10 @@ def main():
                 all_pred_maps = np.concatenate(all_pred_maps, axis=0)
                 all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
                 np.save(all_pred_maps_path, all_pred_maps)
+                
+                all_pred_masks_all = np.concatenate(all_pred_masks_all, axis=0)
+                all_pred_masks_all_path = os.path.join(image_subfolder, f"pred_mask_all_{k}.npy")
+                np.save(all_pred_masks_all_path, all_pred_masks_all)
 
                 for key in all_terms.keys():
                     all_terms_path = os.path.join(
@@ -293,6 +328,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
+        name="",
         data_dir="",
         image_dir="",
         model_dir="",
@@ -311,6 +347,7 @@ def create_argparser():
         last_only=False,
         subset_interval=-1,
         seed=0,  # reproduce
+        use_weighted_sampler=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

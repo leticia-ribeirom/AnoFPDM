@@ -75,31 +75,14 @@ def main():
 
     logger.log("creating data loader...")
 
-    if args.name.lower() == "brats":
-        kwargs = dict(
-            n_healthy_patients=(
-                int(args.n_healthy_patients)
-                if args.n_healthy_patients is not None
-                else None
-            ),
-            n_tumour_patients=(
-                int(args.n_tumour_patients)
-                if args.n_tumour_patients is not None
-                else None
-            ),
-            mixed=args.mixed,
-        )
-    else:
-        kwargs = dict()
-
     data = get_data_iter(
         args.name,
         args.data_dir,
-        args.batch_size, # global batch size, for each device it will be batch_size // num_devices
+        mixed=args.mixed,
+        batch_size=args.batch_size, # global batch size, for each device it will be batch_size // num_devices
         split=args.split,
         ret_lab=args.ret_lab,
         logger=logger,
-        kwargs=kwargs,
     )
 
     check_data(data[0], args.image_dir, name=args.name, split=args.split)

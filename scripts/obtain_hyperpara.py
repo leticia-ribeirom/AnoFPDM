@@ -31,7 +31,7 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     )  # N_val
 
     n_min = 1e6
-    for q in np.linspace(0.01, 0.08, 100):
+    for q in np.linspace(0.005, 0.095, 100):
         n = torch.sum(output_1 > torch.quantile(output_0, q)) + torch.sum(
             output_0 < torch.quantile(output_0, q)
         )
@@ -43,7 +43,6 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
         torch.where(lab == 1)[0]
     ]  # N_val_1 x sample_steps x n_modality
     abe_max = torch.max(abe_diff_1, dim=1)[0]  # N_val_1 x n_modality
-    print(f"abe_max: {abe_max.shape}")
     return thr_01, abe_max.min(dim=0)[0], abe_max.max(dim=0)[0]
 
 
@@ -152,6 +151,7 @@ def get_mask_batch_FPDM(
     mse_null_flat = torch.mean(mse_null, dim=(2, 3, 4))
 
     batch_mask = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
+    batch_mask_all = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
     batch_map = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
     cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 
@@ -215,15 +215,20 @@ def get_mask_batch_FPDM(
         )
         batch_map[sample_num] = mapp
 
+        thr_i = (thr_i / mse.shape[2]) if thr is None else thr
+        mask = mapp >= thr_i
+        batch_mask_all[sample_num] = mask.float()
+        
         if sim <= thr_01:
-            thr_i = (thr_i / mse.shape[2]) if thr is None else thr
-            mask = mapp >= thr_i
             batch_mask[sample_num] = mask.float()
             pred_lab.append(1)
         else:
             pred_lab.append(0)
+           
+            
+        
 
-    return batch_mask, torch.tensor(pred_lab), batch_map
+    return batch_mask, batch_mask_all, torch.tensor(pred_lab), batch_map
 
 
 

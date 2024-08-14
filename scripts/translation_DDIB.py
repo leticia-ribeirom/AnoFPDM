@@ -13,7 +13,7 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
 )
 
-from data import get_brats_data_iter
+from data import get_data_iter
 
 from evaluate import get_stats, evaluate
 from sample import sample
@@ -44,13 +44,15 @@ def main():
         args, args.model_dir, args.model_num, args.ema
     )
 
-    data_test = get_brats_data_iter(
+    data_test = get_data_iter(
+        args.name,
         args.data_dir,
-        args.batch_size,
-        split="test",
         mixed=True,
+        batch_size=args.batch_size,
+        split="test",
         seed=args.seed,
         logger=logger,
+        use_weighted_sampler=args.use_weighted_sampler,
     )
 
     model = DDP(
@@ -63,13 +65,15 @@ def main():
     )
 
     if args.num_batches_val != 0:
-        data_val = get_brats_data_iter(
+        data_val = get_data_iter(
+            args.name,
             args.data_dir,
-            args.batch_size_val,
-            split="val",
             mixed=True,
+            batch_size=args.batch_size_val,
+            split="val",
             seed=args.seed,
             logger=logger,
+            use_weighted_sampler=args.use_weighted_sampler,
         )
 
         opt_thr, dice_max_val = obtain_optimal_threshold(
@@ -84,7 +88,8 @@ def main():
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
     else:
-        opt_thr = 0.22  # 1000 450 w=1.1
+        # opt_thr = 0.22  # brats 1000 450 w=1.1
+        opt_thr = 0.4  # atlas 1000 350 w=1.5
         logger.log(f"optimal threshold: {opt_thr}")
 
     DICE = []
@@ -162,8 +167,12 @@ def main():
         )
         PRED_Y.append(pred_lab)
 
-        eval_metrics = evaluate(mask, pred_mask, source, pred_map)
-        eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
+        eval_metrics = evaluate(
+            mask, pred_mask, source, pred_map, cc_filter=args.cc_filter
+        )
+        eval_metrics_ano = evaluate(
+            mask, pred_mask, source, pred_map, lab, cc_filter=args.cc_filter
+        )
         cls_metrics = get_stats(Y, PRED_Y)
 
         DICE.append(eval_metrics["dice"])
@@ -193,7 +202,15 @@ def main():
         logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
         logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
         logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
-
+        logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        logger.log(f"mean dice ano: {eval_metrics_ano['dice']:0.3f}")
+        logger.log(f"mean iou ano: {eval_metrics_ano['iou']:0.3f}")
+        logger.log(f"mean precision ano: {eval_metrics_ano['precision']:0.3f}")
+        logger.log(f"mean recall ano: {eval_metrics_ano['recall']:0.3f}")
+        logger.log(f"mean auc ano: {eval_metrics_ano['AUC']:0.3f}")
+        logger.log(f"mean pr auc ano: {eval_metrics_ano['PR_AUC']:0.3f}")
         logger.log(
             "-------------------------------------------------------------------------------------------"
         )
@@ -282,6 +299,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
+        name="",
         data_dir="",
         image_dir="",
         model_dir="",
@@ -296,6 +314,8 @@ def create_argparser():
         save_data=False,
         num_batches_val=2,
         batch_size_val=100,
+        cc_filter=True,
+        use_weighted_sampler=True,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

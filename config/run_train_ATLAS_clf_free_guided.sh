@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --mem=16G
 #SBATCH -p general                
-#SBATCH -q public
+#SBATCH -q grp_twu02 
             
 #SBATCH -t 2-00:00:00               
             
@@ -20,7 +20,7 @@ source activate torch_base
 
 ddpm_sampling=False # ddim or ddpm
 
-in_channels=4
+in_channels=1
 batch_size=64
 save_interval=5000
 
@@ -30,9 +30,9 @@ threshold=0.1
 version=v2
 
 # log dir
-export OPENAI_LOGDIR="./logs/clf_free_guided"
+export OPENAI_LOGDIR="./logs/logs_atlas_normal_99_11_128/logs_guided_${threshold}_${version}_t1"
 # data dir
-data_dir="/data/preprocessed_data"
+data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
 image_dir="$OPENAI_LOGDIR/images"
 
 GUI_FLAGS="--w 1 1.8 2 3 --threshold $threshold" # select w for visual check only
@@ -70,7 +70,7 @@ torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\
          --rdzv-backend=c10d\
          --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-        ./scripts/train.py --name brats $DATA_FLAGS $MODEL_FLAGS $DIFFUSION_FLAGS $TRAIN_FLAGS $GUI_FLAGS $EVA_FLAGS 
+        ./scripts/train.py --name ATLAS $DATA_FLAGS $MODEL_FLAGS $DIFFUSION_FLAGS $TRAIN_FLAGS $GUI_FLAGS $EVA_FLAGS 
 
 
 

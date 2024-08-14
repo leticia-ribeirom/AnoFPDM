@@ -24,7 +24,7 @@ source activate torch_base
 threshold=0.1
 num_classes=2
 seed=0
-in_channels=4
+in_channels=1
 num_channels=128
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
@@ -37,7 +37,7 @@ echo $MASTER_PORT
 image_size=128
 rev_steps=600
 diffusion_steps=1000
-model_num=210000
+model_num=290000
 version=v2
 
 tuned=False # set tuned to true to use hyperparameter tuned by pixel-level label 
@@ -45,14 +45,14 @@ tuned=False # set tuned to true to use hyperparameter tuned by pixel-level label
 
 d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding) 
                 # or will be ddpm reverse (stochastic encoding)
-for w in 2 
+for w in 1.5 
 do
     
-    export OPENAI_LOGDIR="./logs/translation_fpdm_${w}_${model_num}_${rev_steps}"
+    export OPENAI_LOGDIR="./logs_ATLAS/translation_fpdm_${w}_${model_num}_${rev_steps}_weighted_all"
     echo $OPENAI_LOGDIR
 
-    data_dir="/data/preprocessed_data"
-    model_dir="./logs/clf_free_guided"
+    data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
+    model_dir="./logs/logs_atlas_normal_99_11_128/logs_guided_${threshold}_${version}_t1"
 
     image_dir="$OPENAI_LOGDIR"
 
@@ -61,9 +61,9 @@ do
                     --num_channels $num_channels --model_num $model_num --ema True\
                     --rev_steps $rev_steps --d_reverse $d_reverse --tuned $tuned" 
 
-    DATA_FLAGS="--batch_size 100 --num_batches 100 \
-                --batch_size_val 100 --num_batches_val 10\
-                --modality 0 3"
+    DATA_FLAGS="--batch_size 100 --num_batches 30 \
+                --batch_size_val 100 --num_batches_val 0\
+                --modality 0 --use_weighted_sampler True"
 
     DIFFUSION_FLAGS="--null True \
                         --dynamic_clip False \
@@ -78,10 +78,12 @@ do
 
 
     NUM_GPUS=1
-    torchrun --nproc-per-node $NUM_GPUS \
-                --nnodes=1\
-                --rdzv-backend=c10d\
-                --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-            ./scripts/translation_FPDM.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
+    # torchrun --nproc-per-node $NUM_GPUS \
+    #             --nnodes=1\
+    #             --rdzv-backend=c10d\
+    #             --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
+    #             ./scripts/translation_FPDM.py --name atlas $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
+
+    torchrun ./scripts/translation_FPDM.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
 
 done

@@ -18,3 +18,5 @@ preprocess_t1.py
 /figs/
 /.vscode/
 /figs/
+
+*MSLUB*.sh

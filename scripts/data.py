@@ -83,11 +83,11 @@ class BrainDataset(Dataset):
     def __init__(
         self,
         datapath,
-        split="val",
-        n_tumour_patients=None,
+        split="train",
+        n_unhealthy_patients=None,
         n_healthy_patients=None,
-        skip_healthy_s_in_tumour=False,  # whether to skip healthy slices in "tumour" patients
-        skip_tumour_s_in_healthy=True,  # whether to skip tumour slices in healthy patients
+        skip_healthy_s_in_unhealthy=False,  # whether to skip healthy slices in unhealthy patients
+        skip_unhealthy_s_in_healthy=True,  # whether to skip unhealthy slices in healthy patients
         mixed=False,
         ret_lab=False,
         seed=0,
@@ -105,18 +105,18 @@ class BrainDataset(Dataset):
 
         # Slice skip conditions:
         threshold = 0
-        self.skip_tumour = lambda item: item[1].sum() > threshold
+        self.skip_unhealthy = lambda item: item[1].sum() > threshold
         self.skip_healthy = lambda item: item[1].sum() <= threshold
 
         def process(idx, x, y):
-            # treat all tumour classes as one for anomaly detection purposes.
+            # treat all unhealthy classes as one for anomaly detection purposes.
             y = y > 0.5
             # x, y are 1x1x128x128 or x is 1x4x128x128 or 240x240
             x_tensor = torch.from_numpy(x[0]).float()
             y_tensor = torch.from_numpy(y[0]).float()
 
-            if_tumor = torch.from_numpy(y[0]).float().sum() > 0
-            lab = 1 if if_tumor else 0
+            if_unhealthy = torch.from_numpy(y[0]).float().sum() > 0
+            lab = 1 if if_unhealthy else 0
             
             # rescacle to [-1, 1]
             x_min = x_tensor.view(x_tensor.shape[0], -1).min(1).values
@@ -131,7 +131,7 @@ class BrainDataset(Dataset):
         self.rng.shuffle(patient_dirs)
 
         
-        if mixed: # take all slices 
+        if mixed: # just take all slices 
             num_mix = len(patient_dirs) if num_mix is None else num_mix
             self.patient_datasets = [
                 PatientDataset(
@@ -139,17 +139,17 @@ class BrainDataset(Dataset):
                 )
                 for i in range(num_mix)
             ]
-        else: # take n_tumour_patients and n_healthy_patients
-            assert (n_tumour_patients is not None) or (n_healthy_patients is not None)
-            self.n_tumour_patients = (
-                n_tumour_patients
-                if n_tumour_patients is not None
+        else: # take n_unhealthy_patients and n_healthy_patients
+            assert (n_unhealthy_patients is not None) or (n_healthy_patients is not None)
+            self.n_unhealthy_patients = (
+                n_unhealthy_patients
+                if n_unhealthy_patients is not None
                 else len(patient_dirs)
             )
             self.n_healthy_patients = (
                 n_healthy_patients
                 if n_healthy_patients is not None
-                else len(patient_dirs) - self.n_tumour_patients
+                else len(patient_dirs) - self.n_unhealthy_patients
             )
 
             self.patient_datasets = [
@@ -158,10 +158,10 @@ class BrainDataset(Dataset):
                     process_fun=process,
                     id=i,
                     skip_condition=(
-                        self.skip_healthy if skip_healthy_s_in_tumour else None
+                        self.skip_healthy if skip_healthy_s_in_unhealthy else None
                     ),
                 )
-                for i in range(self.n_tumour_patients)
+                for i in range(self.n_unhealthy_patients)
             ]
 
             # + only healthy slices from "healthy" patients
@@ -171,12 +171,12 @@ class BrainDataset(Dataset):
                     process_fun=process,
                     id=i,
                     skip_condition=(
-                        self.skip_tumour if skip_tumour_s_in_healthy else None
+                        self.skip_unhealthy if skip_unhealthy_s_in_healthy else None
                     ),
                 )
                 for i in range(
-                    self.n_tumour_patients,
-                    self.n_tumour_patients + self.n_healthy_patients,
+                    self.n_unhealthy_patients,
+                    self.n_unhealthy_patients + self.n_healthy_patients,
                 )
             ]
 
@@ -196,69 +196,39 @@ class BrainDataset(Dataset):
         return len(self.dataset)
 
 
-# %% load brats
-def load_brats(
-    data_dir,
-    split,
-    n_healthy_patients=None,
-    n_tumour_patients=None,
-    mixed=False,
-    ret_lab=False,
-    num_mix=None,
-):
-
-    assert split in ["train", "val", "test"]
-
-    if split == "train":
-        return BrainDataset(
-            data_dir,
-            split="train",
-            n_tumour_patients=n_tumour_patients,
-            n_healthy_patients=n_healthy_patients,
-            mixed=mixed,
-            ret_lab=ret_lab,
-        )
-    else:
-        return BrainDataset(
-            data_dir,
-            split=split,
-            n_tumour_patients=n_tumour_patients,
-            n_healthy_patients=n_healthy_patients,
-            mixed=mixed,
-            ret_lab=ret_lab,
-            num_mix=num_mix,
-        )
-
-
 # %%
-def get_brats_data_iter(
+def get_data_iter(
+    name,
     data_dir,
     batch_size,
     split="train",
     ret_lab=False,
     logger=None,
     n_healthy_patients=None,
-    n_tumour_patients=None,
+    n_unhealthy_patients=None,
     mixed=False,
     num_mix=None,
     seed=0,
+    use_weighted_sampler=True,
 ):
 
     # torch.random.manual_seed(seed)
     rng = torch.Generator()
     rng.manual_seed(seed)
 
-    data = load_brats(
+    assert split in ["train", "val", "test"]
+
+    data =  BrainDataset(
         data_dir,
-        split,
-        n_healthy_patients,
-        n_tumour_patients,
+        split=split,
+        n_unhealthy_patients=n_unhealthy_patients,
+        n_healthy_patients=n_healthy_patients,
         mixed=mixed,
         ret_lab=ret_lab,
         num_mix=num_mix,
     )
-
-    if split == "val": # for single GPU
+    
+    if (split == "val" and use_weighted_sampler) or (split == "test" and use_weighted_sampler): # for single GPU
         labels = [data[i][2] for i in range(len(data))]
 
         class_sample_count = np.array(
@@ -269,9 +239,8 @@ def get_brats_data_iter(
         samples_weight = np.array([weight[t] for t in labels])
         samples_weight = torch.from_numpy(samples_weight)
         samples_weight = samples_weight.double()
-        replacement = True
         sampler = WeightedRandomSampler(
-            samples_weight, len(samples_weight), replacement=replacement, generator=rng
+            samples_weight, len(samples_weight), replacement=False, generator=rng
         )
     elif split == "train":
         sampler = DistributedSampler(
@@ -294,21 +263,23 @@ def get_brats_data_iter(
         drop_last=True if split == 'train' else False,
     )
 
+     # count the number of samples for each class
     if logger is not None:
-        logger.log(f"data_size: {data.__len__()}")
-
-    
-    # if training:
-    #     while True:
-    #         yield from loader
-    # else:
-    #     yield from loader
+        if split == "train":
+            labels = [data[i][1]['y'] for i in range(len(data))]
+        else:
+            labels = [data[i][2] for i in range(len(data))]
+        class_sample_count = np.array(
+            [(t, len(np.where(labels == t)[0])) for t in np.unique(labels)]
+        )
+        logger.log(f"{name} class sample count: {class_sample_count}")
+        
     if split == "train":
         return loader, sampler
     return loader
 
 
-def check_data(loader, image_dir, split="train", name="cifar10"):
+def check_data(loader, image_dir, split="train", name="brats"):
     if split == "train":
         samples, _ = loader.__iter__().__next__()
     else:
@@ -319,7 +290,8 @@ def check_data(loader, image_dir, split="train", name="cifar10"):
     if samples.shape[1] == 4:
         samples_for_each_cls = samples.shape[1]
         samples = samples.reshape(-1, 1, *samples.shape[2:])[:64]
-        samples = (samples + 1) / 2
+        
+    samples = (samples + 1) / 2
 
     images = make_grid(samples, nrow=samples_for_each_cls)
 
@@ -333,47 +305,20 @@ def check_data(loader, image_dir, split="train", name="cifar10"):
         )
 
 
-        
-
-def get_data_iter(
-    name,
-    data_dir,
-    batch_size,
-    split="train",
-    ret_lab=False,
-    logger=None,
-    kwargs=None,
-):
-
-    if name.lower() == "brats":
-        return get_brats_data_iter(
-            data_dir,
-            batch_size,
-            split=split,
-            ret_lab=ret_lab,
-            logger=logger,
-            **kwargs,
-        )
-    elif name.lower() == "t1":
-        pass
-    else:
-        raise NotImplementedError
-
-
 if __name__ == "__main__":
   
-    data_dir = "/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
-    data = get_brats_data_iter(
+    # data_dir = "/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
+    # data_dir = "/data/amciilab/yiming/DATA/MSLUB/preprocessed_data_flair_5656" 
+    data_dir = "/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
+    data = get_data_iter(
+        'atlas',
         data_dir,
         128,
         split="test",
-        training=False,
-        # n_healthy_patients=None,
-        # n_tumour_patients=None,
         mixed=True,
         ret_lab=True,
     )
-    samples, gt, lab = next(data)
+    samples, gt, lab = data.__iter__().__next__()
     print("batch shape: ", samples.shape)
     print("sample shape: ", samples[0].shape)
     print("gt: ", gt.shape)
@@ -383,11 +328,11 @@ if __name__ == "__main__":
     # print('slice_num: ', slice_num[0])
     print("channel 1 max: ", samples[0][0].max())
     print("channel 1 min: ", samples[0][0].min())
-    print('channel 2 max: ', samples[0][1].max())
-    print('channel 2 min: ', samples[0][1].min())
-    print('channel 3 max: ', samples[0][2].max())
-    print('channel 3 min: ', samples[0][2].min())
-    print('channel 4 max: ', samples[0][3].max())
-    print('channel 4 min: ', samples[0][3].min())
+    # print('channel 2 max: ', samples[0][1].max())
+    # print('channel 2 min: ', samples[0][1].min())
+    # print('channel 3 max: ', samples[0][2].max())
+    # print('channel 3 min: ', samples[0][2].min())
+    # print('channel 4 max: ', samples[0][3].max())
+    # print('channel 4 min: ', samples[0][3].min())
 
-    check_data(data, split="test", image_dir="./", name="mmbrain")
+    check_data(data, split="test", image_dir="./", name="atlas")

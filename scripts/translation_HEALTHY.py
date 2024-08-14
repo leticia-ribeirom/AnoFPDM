@@ -13,7 +13,7 @@ from guided_diffusion.script_util import (
     add_dict_to_argparser,
 )
 
-from data import get_brats_data_iter
+from data import get_data_iter
 
 from evaluate import get_stats, evaluate
 from sample import sample
@@ -64,13 +64,15 @@ def main():
         args, args.model_dir, args.model_num, args.ema
     )
 
-    data_test = get_brats_data_iter(
+    data_test = get_data_iter(
+        args.name,
         args.data_dir,
-        args.batch_size,
-        split="test",
         mixed=True,
+        batch_size=args.batch_size,
+        split="test",
         seed=args.seed,
         logger=logger,
+        use_weighted_sampler=args.use_weighted_sampler,
     )
 
     model = DDP(
@@ -83,13 +85,15 @@ def main():
     )
 
     if args.num_batches_val != 0:
-        data_val = get_brats_data_iter(
+        data_val = get_data_iter(
+            args.name,
             args.data_dir,
-            args.batch_size_val,
-            split="val",
             mixed=True,
+            batch_size=args.batch_size_val,
+            split="val",
             seed=args.seed,
             logger=logger,
+            use_weighted_sampler=args.use_weighted_sampler,
         )
 
         opt_thr, dice_max_val = obtain_optimal_threshold(

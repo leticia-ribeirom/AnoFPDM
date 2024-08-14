@@ -72,41 +72,27 @@ def main():
 
     logger.log("creating data loader...")
 
-    if args.name.lower() == "brats":
-        kwargs = dict(
-            n_healthy_patients=int(args.n_healthy_patients)
-            if args.n_healthy_patients is not None
-            else None,
-            n_tumour_patients=int(args.n_tumour_patients)
-            if args.n_tumour_patients is not None
-            else None,
-            mixed=args.mixed,
-            num_mix=int(args.num_mix) if args.num_mix is not None else None,
-        )
-    else:
-        kwargs = dict()
-
     data = get_data_iter(
         args.name,
         args.data_dir,
-        args.batch_size,
+        mixed=args.mixed,
+        batch_size=args.batch_size, # global batch size, for each device it will be batch_size // num_devices
         split="train",
         ret_lab=True,
         logger=logger,
-        kwargs=kwargs,
     )
 
     val_data = get_data_iter(
         args.name,
         args.data_dir,
-        args.batch_size,
+        mixed=args.mixed,
+        batch_size=args.batch_size, # global batch size, for each device it will be batch_size // num_devices
         split="val",
         ret_lab=True,
         logger=logger,
-        kwargs=kwargs,
     )
 
-    check_data(data, args.image_dir, name=args.name, split="train")
+    check_data(data[0], args.image_dir, name=args.name, split="train")
 
     logger.log(f"creating optimizer...")
     opt = AdamW(mp_trainer.master_params, lr=args.lr, weight_decay=args.weight_decay)
@@ -124,12 +110,12 @@ def main():
     def forward_backward_log(data_loader, prefix="train"):
         
         if prefix == "train":
-            batch, labels = next(data_loader)
+            batch, labels = data_loader[0].__iter__().__next__()
             labels = labels["y"]
         else:
-            if args.name.lower() == "brats":
-                batch, _, labels = next(data_loader)
-            elif args.name.lower() == "cifar10":
+            
+            batch, _, labels = data_loader.__iter__().__next__()
+            if args.name.lower() == "cifar10":
                 batch, labels = next(data_loader)
                 labels = labels["y"]
             
@@ -155,11 +141,12 @@ def main():
                 logits, sub_labels, k=1, reduction="none"
             )
             
-            if args.name.lower() == "brats":
-                losses[f"{prefix}_acc@2"] = compute_top_k(
-                    logits, sub_labels, k=2, reduction="none"
-                )
-            elif args.name.lower() == "cifar10":
+          
+            losses[f"{prefix}_acc@2"] = compute_top_k(
+                logits, sub_labels, k=2, reduction="none"
+            )
+            
+            if args.name.lower() == "cifar10":
                 losses[f"{prefix}_acc@5"] = compute_top_k(
                     logits, sub_labels, k=5, reduction="none"
                 )
@@ -242,6 +229,7 @@ def split_microbatches(microbatch, *args):
 
 def create_argparser():
     defaults = dict(
+        name="",
         data_dir="",
         val_data_dir="",
         image_dir="",
@@ -257,10 +245,7 @@ def create_argparser():
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
-        name="brats",
         unet_ver="v1",
-        n_tumour_patients=None,
-        n_healthy_patients=None,
         mixed=True,
         num_mix=10,
     )

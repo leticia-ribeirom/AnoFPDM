@@ -31,7 +31,7 @@ def center_crop(volume, target_shape):
     return cropped_volume
     
 
-def process_patient(name, path, target_path, mod, pre=-1, post=-1, downsample=True):
+def process_patient(name, path, target_path, mod, first=-1, last=-1, downsample=False):
     
     if name == 'brats':
         flair = nib.load(path / f"{path.name}_flair.nii.gz").get_fdata()
@@ -39,6 +39,9 @@ def process_patient(name, path, target_path, mod, pre=-1, post=-1, downsample=Tr
         t1ce = nib.load(path / f"{path.name}_t1ce.nii.gz").get_fdata()
         t2 = nib.load(path / f"{path.name}_t2.nii.gz").get_fdata()
         labels = nib.load(path / f"{path.name}_seg.nii.gz").get_fdata()
+    elif name == "atlas":
+        t1 = nib.load(path / f"{path.name}_T1w.nii.gz").get_fdata()
+        labels = nib.load(path / f"{path.name}_mask.nii.gz").get_fdata()
     elif name == 'mmbrain':
         seed = random.randint(1, 5)
         flair = center_crop(nrrd.read(path / f"TrialSeed{seed}_FLAIR.nrrd")[0], 240).astype(np.float64)
@@ -46,6 +49,9 @@ def process_patient(name, path, target_path, mod, pre=-1, post=-1, downsample=Tr
         t1ce = center_crop(nrrd.read(path / f"TrialSeed{seed}_T1Gad.nrrd")[0], 240).astype(np.float64)
         t2 = center_crop(nrrd.read(path / f"TrialSeed{seed}_T2.nrrd")[0], 240).astype(np.float64)
         labels = center_crop(nrrd.read(path / f"TrialSeed{seed}_discrete_truth.nrrd")[0], 240).astype(np.float64)
+    elif name == "mslub":
+        flair = np.moveaxis(nib.load(path / f"{path.name}_FLAIR.nii.gz").get_fdata(), 0, -1)
+        labels = np.moveaxis(nib.load(path / f"{path.name}_consensus_gt.nii.gz").get_fdata(), 0, -1)
     else:
         raise ValueError(f"Dataset {name} not supported.")
 
@@ -66,18 +72,18 @@ def process_patient(name, path, target_path, mod, pre=-1, post=-1, downsample=Tr
     # exclude first n and last m slices
     # 1 4 240 240 155; 240 240 155
     
-    if pre > 0 and post > 0:
-        volume = volume[:, :, :, :, pre:-post]
-        labels = labels[:, :, pre:-post]
-    elif pre > 0 and post < 0:
-        volume = volume[:, :, :, :, pre:]
-        labels = labels[:, :, pre:]
-    elif pre < 0 and post > 0:
-        volume = volume[:, :, :, :, :-post]
-        labels = labels[:, :, :-post]
+    if first > 0 and last > 0:
+        volume = volume[:, :, :, :, first:-last]
+        labels = labels[:, :, first:-last]
+    elif first > 0 and last < 0:
+        volume = volume[:, :, :, :, first:]
+        labels = labels[:, :, first:]
+    elif first < 0 and last > 0:
+        volume = volume[:, :, :, :, :-last]
+        labels = labels[:, :, :-last]
         
     # 1 1 240 240 155
-    if name == 'brats':
+    if name == 'brats' or name == 'mslub' or name == 'atlas':
         labels = torch.from_numpy(labels > 0.5).float().unsqueeze(dim=0).unsqueeze(dim=0)
     elif name == 'mmbrain':
         labels = torch.where(torch.from_numpy(labels)==5, 1, 0).float().unsqueeze(dim=0).unsqueeze(dim=0)
@@ -95,19 +101,23 @@ def process_patient(name, path, target_path, mod, pre=-1, post=-1, downsample=Tr
     
     for slice_idx in range(fs_dim2, ls_dim2):
         if downsample:
-            low_res_x = F.interpolate(volume[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
-            low_res_y = F.interpolate(labels[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
+            if name == 'brats' or name == 'atlas':
+                low_res_x = F.interpolate(volume[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
+                low_res_y = F.interpolate(labels[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
+            elif name == 'mslub':
+                low_res_x = F.interpolate(volume[:, :, :, :, slice_idx], mode="bilinear", size=(256, 256))
+                low_res_y = F.interpolate(labels[:, :, :, :, slice_idx], mode="bilinear", size=(256, 256))
         else:
             low_res_x = volume[:, :, :, :, slice_idx]
             low_res_y = labels[:, :, :, :, slice_idx]
         np.savez_compressed(patient_dir / f"slice_{slice_idx}", x=low_res_x, y=low_res_y)
 
 
-def preprocess(name: str, datapath: Path, mod: str, pre=-1, post=-1):
+def preprocess(name: str, datapath: Path, mod: str, first=-1, last=-1, shape=128, downsample=False):
 
     all_imgs = sorted(list((datapath).iterdir()))
 
-    sub_dir = f"preprocessed_data_{mod}_{pre}{post}_128"
+    sub_dir = f"preprocessed_data_{mod}_{first}{last}_{shape}"
     splits_path = datapath.parent / sub_dir / "data_splits"
 
     if not splits_path.exists():
@@ -120,10 +130,18 @@ def preprocess(name: str, datapath: Path, mod: str, pre=-1, post=-1):
             n_train = int(len(indices) * 0.75)
             n_val = int(len(indices) * 0.05)
             n_test = len(indices) - n_train - n_val
+        elif name == 'atlas':
+            n_train = int(len(indices) * 0.75)
+            n_val = int(len(indices) * 0.05)
+            n_test = len(indices) - n_train - n_val
         elif name == 'mmbrain':
             n_train = 0
             n_val = 5
             n_test = len(indices) - n_train - n_val
+        elif name == 'MSLUB':
+            n_train = 20
+            n_val = 5
+            n_test = 5
 
         split_indices = {}
         split_indices["train"] = indices[:n_train]
@@ -142,7 +160,7 @@ def preprocess(name: str, datapath: Path, mod: str, pre=-1, post=-1):
 
         for source_path in tqdm(paths):
             target_path = datapath.parent / sub_dir / f"npy_{split}"
-            process_patient(name, source_path, target_path, mod, pre, post, downsample=True)
+            process_patient(name, source_path, target_path, mod, first, last, downsample=downsample)
 
 
 if __name__ == "__main__":
@@ -150,20 +168,28 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
-    parser.add_argument("--name", default='brats', type=str, help="dataset name")
-    parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
+    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
+    # parser.add_argument("--name", default='brats', type=str, help="dataset name")
+    # parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
     
     
     
+    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/MSLUB/data', type=str, help="path to data directory")
+    # parser.add_argument("--name", default='MSLUB', type=str, help="dataset name")
+    # parser.add_argument("--mod", default='all', type=str, help="modelity to preprocess")
     
-    parser.add_argument("--pre", default=0, 
+    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/ATLAS/raw2', type=str, help="path to data directory")
+    parser.add_argument("--name", default='atlas', type=str, help="dataset name")
+    parser.add_argument("--mod", default='t1', type=str, help="modelity to preprocess")
+     
+     
+    parser.add_argument("--first", default=0, 
                         type=int, help="skip first n slices")
-    parser.add_argument("--post", default=0,
+    parser.add_argument("--last", default=0,
                         type=int, help="skip last n slices")
     
     args = parser.parse_args()
 
     datapath = Path(args.source)
    
-    preprocess(args.name, datapath, args.mod, args.pre, args.post)
+    preprocess(args.name, datapath, args.mod, args.first, args.last, downsample=True)

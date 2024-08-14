@@ -26,11 +26,8 @@ image_size=128
 version=v1
 num_classes=2
 
-if [ "$modality" == "all" ]; then
-    in_channels=4
-elif [ "$modality" == "flair" ]; then
-    in_channels=1
-fi
+in_channels=4
+
 
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
