@@ -2,11 +2,10 @@ import torch
 import numpy as np
 from sample import sample
 from evaluate import evaluate, median_pool
-from noise import generate_simplex_noise
 
 
 # %% This block is for the proposed method
-def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
+def cal_cos_and_abe_range(mse_flat, mse_null_flat, diff_flat, lab):
     """
     mse_flat: N_val x sample_steps x n_modality
     mse_null_flat: N_val x sample_steps x n_modality
@@ -18,7 +17,6 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
     """
     mse_0_flat = mse_flat[torch.where(lab == 0)[0]]
     mse_1_flat = mse_flat[torch.where(lab == 1)[0]]
-    # print(f"mse_0_flat: {mse_0_flat.shape}")
     mse_0_null_flat = mse_null_flat[torch.where(lab == 0)[0]]
     mse_1_null_flat = mse_null_flat[torch.where(lab == 1)[0]]
 
@@ -39,21 +37,19 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, abe_flat, lab):
             n_min = n
             thr_01 = torch.quantile(output_0, q)
 
-    abe_diff_1 = abe_flat[
-        torch.where(lab == 1)[0]
-    ]  # N_val_1 x sample_steps x n_modality
-    abe_max = torch.max(abe_diff_1, dim=1)[0]  # N_val_1 x n_modality
-    return thr_01, abe_max.min(dim=0)[0], abe_max.max(dim=0)[0]
+    diff_1 = diff_flat[torch.where(lab == 1)[0]]  # N_val_1 x sample_steps x n_modality
+    diff_max = torch.max(diff_1, dim=1)[0]  # N_val_1 x n_modality
+    return thr_01, diff_max.min(dim=0)[0], diff_max.max(dim=0)[0]
 
 
 def obtain_hyperpara(data_val, diffusion, model, args, device):
-    '''
+    """
     return the optimal threshold for cosine similarity for classification
             and the range of abe diff for quantile threshold for predicted mask
-    '''
+    """
     MSE = []
     MSE_NULL = []
-    ABE_DIFF = []
+    DIFF = []
     LAB = []
 
     # TODO: make it memory efficient!
@@ -81,35 +77,32 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
             model_kwargs_reverse=model_kwargs_reverse,
         )
 
-        mse = (
-            xstarts["xstart"] - source_val[:, args.modality, ...].unsqueeze(1)
+        # for cosine similarity
+        mse_flat = torch.mean(
+            (xstarts["xstart"] - source_val[:, args.modality, ...].unsqueeze(1)) ** 2,
+            dim=(3, 4),
+        )  # batch_size x sample_steps x n_modality
+        mse_null_flat = torch.mean(
+            (xstarts["xstart_null"] - source_val[:, args.modality, ...].unsqueeze(1)) ** 2,
+            dim=(3, 4),
+        )
+        # for scaled M_t (threshold selection)
+        diff = (
+            (xstarts["xstart"] - xstarts["xstart_null"])
         ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
-      
-
-        mse_null = (
-            xstarts["xstart_null"]
-            - source_val[:, args.modality, ...].unsqueeze(1)
-        ) ** 2
-
-        abe_diff = torch.abs(
-            (mse - mse_null)
-        )  # batch_size x sample_steps x n_modality x 128 x 128
-
-        mse_flat = torch.mean(mse, dim=(3, 4))  # batch_size x sample_steps x n_modality
-        mse_null_flat = torch.mean(mse_null, dim=(3, 4))
-        abe_diff_flat = torch.mean(abe_diff, dim=(3, 4))
-
+        diff_flat = torch.mean(diff, dim=(3, 4))
+        
         MSE.append(mse_flat)
         MSE_NULL.append(mse_null_flat)
-        ABE_DIFF.append(abe_diff_flat)
+        DIFF.append(diff_flat)
         LAB.append(lab_val)
 
     MSE = torch.cat(MSE, dim=0)
     MSE_NULL = torch.cat(MSE_NULL, dim=0)
-    ABE_DIFF = torch.cat(ABE_DIFF, dim=0)
+    DIFF = torch.cat(DIFF, dim=0)
     LAB = torch.cat(LAB, dim=0)
-    thr_01, abe_min, abe_max = cal_cos_and_abe_range(MSE, MSE_NULL, ABE_DIFF, LAB)
-    return thr_01, abe_min, abe_max
+    thr_01, diff_min, diff_max = cal_cos_and_abe_range(MSE, MSE_NULL, DIFF, LAB)
+    return thr_01, diff_min, diff_max
 
 
 def get_mask_batch_FPDM(
@@ -117,13 +110,13 @@ def get_mask_batch_FPDM(
     source,
     modality,
     thr_01,
-    abe_min,
-    abe_max,
+    diff_min,
+    diff_max,
     shape,
     device,
-    thr = None,
-    t_e = None,
-    t_e_ratio = 1,
+    thr=None,
+    t_e=None,
+    t_e_ratio=1,
     median_filter=True,
     last_only=False,
     interval=-1,
@@ -131,83 +124,94 @@ def get_mask_batch_FPDM(
     """
     thr_01: threshold for cosine similarity (healthy or unhealthy)
     thr: threshold for predicted mask (if not provided, it will be calculated)
-    t_e: steps (noise scale) for predicted mask (if not provided, it will be calculated)  
-    mse: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
-    mse_null: batch_size x sample_steps x n_modality x 128 x 128 or 256 x 256
+    t_e: steps (noise scale) for predicted mask (if not provided, it will be calculated)
+    mse: batch_size x sample_steps x n_modality x H x W 
+    mse_null: batch_size x sample_steps x n_modality x H x W 
     """
+    # sub-anomaly maps for aggregation
     mse = (
         xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)
     ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
-    mse_null = (
-        xstarts["xstart_null"] - source[:, modality, ...].unsqueeze(1)
-    ) ** 2
 
-    abe_diff = torch.mean(
-        torch.abs((mse - mse_null)),
-        dim=(3, 4),  # batch_size x sample_steps x n_modality
+    # mse = (xstarts["xstart"] - xstarts["xstart_null"]) ** 2
+    # for cosine similarity
+    mse_flat = torch.mean(
+        (xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)) ** 2, dim=(2, 3, 4)
+    )  # batch_size x sample_steps
+
+    mse_null_flat = torch.mean(
+        (xstarts["xstart_null"] - source[:, modality, ...].unsqueeze(1)) ** 2, dim=(2, 3, 4),
     )
-
-    mse_flat = torch.mean(mse, dim=(2, 3, 4))  # batch_size x sample_steps
-    mse_null_flat = torch.mean(mse_null, dim=(2, 3, 4))
+    
+    # for t_e selection 
+    diff_flat = torch.mean(
+        (xstarts["xstart"] - xstarts["xstart_null"]) ** 2, dim=(3, 4),  
+    ) # batch_size x sample_steps x n_modality
 
     batch_mask = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
     batch_mask_all = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
     batch_map = torch.zeros(mse_flat.shape[0], 1, shape, shape).to(device)
     cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 
-    quant_range = torch.flip(torch.linspace(0.90, 0.98, 101), dims=(0,)).to(
-        device
-    )
+    quant_range = torch.flip(torch.linspace(0.90, 0.98, 101), dims=(0,)).to(device)
 
     pred_lab = []
-    for sample_num in range(abe_diff.shape[0]):
+    for sample_num in range(diff_flat.shape[0]):
         # get the cosine similarity between mse and mse_null
         sim = cos(
             mse_flat[sample_num : sample_num + 1, ...],
             mse_null_flat[sample_num : sample_num + 1, ...],
         )
 
-        # get the quantile threshold for predicted mask 
-        abe_diff_i = abe_diff[sample_num, ...]  # sample_steps x n_modality
-        
-        abe_max_i = abe_diff_i.max(dim=0)[0]  # n_modality
-        abe_max_i = torch.clamp((abe_max_i / abe_max), 0, 1)
-        abe_max_i = torch.round(abe_max_i, decimals=2) * 100
-        
-        index = abe_max_i.to(torch.int64)  # n_modality
+        # get the quantile threshold for predicted mask
+        diff_i = diff_flat[sample_num, ...]  # sample_steps x n_modality
+
+        diff_max_i = diff_i.max(dim=0)[0]  # n_modality
+        diff_max_i = torch.clamp((diff_max_i / diff_max), 0, 1)
+        diff_max_i = torch.round(diff_max_i, decimals=2) * 100
+
+        index = diff_max_i.to(torch.int64)  # n_modality
         quant = quant_range[index]
 
         # get the steps for predicted mask
         t_s_i = torch.tensor([0, 0], device=device)
-        t_e_i = torch.argmax(abe_diff_i, dim=0)  if t_e is None else t_e # n_modality
-        
+        t_e_i = torch.argmax(diff_i, dim=0) if t_e is None else t_e  # n_modality
+
         if t_e_ratio != 1:
             t_e_i = torch.round(t_e_i * t_e_ratio).to(torch.int64)
-            
+
         if last_only:
             t_s_i = t_e_i - 1
-            assert interval == -1 # no interval for last_only
-        
-        thr_i = 0 
+            assert interval == -1  # no interval for last_only
+
+        thr_i = 0
         mapp = torch.zeros(1, 1, shape, shape).to(device)
         for mod in range(mse.shape[2]):
-            mse_subset = mse[sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...] # sample_steps x 1 x 128 x 128
-            
+            mse_subset = mse[
+                sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...
+            ]  # sample_steps x 1 x 128 x 128
+
             if interval != -1:
                 assert interval > 0
                 mse_subset = mse_subset[::interval, ...]
                 # add the last step
-                mse_subset = torch.cat([mse_subset, mse[sample_num, t_e_i[mod]:t_e_i[mod]+1, [mod], ...]], dim=0)
-                
+                mse_subset = torch.cat(
+                    [
+                        mse_subset,
+                        mse[sample_num, t_e_i[mod] : t_e_i[mod] + 1, [mod], ...],
+                    ],
+                    dim=0,
+                )
+
             mask_mod = torch.mean(
                 mse_subset, axis=[0, 1], keepdim=True
             )  # 1 x 1 x 128 x 128
-            
+
             thr_i += torch.quantile(mask_mod.reshape(-1), quant[mod])
             mapp += mask_mod
 
         # collect the predicted mask and map
-        mapp /= mse.shape[2] # average over n_modality
+        mapp /= mse.shape[2]  # average over n_modality
         mapp = (
             median_pool(mapp, kernel_size=5, stride=1, padding=2)
             if median_filter
@@ -218,20 +222,14 @@ def get_mask_batch_FPDM(
         thr_i = (thr_i / mse.shape[2]) if thr is None else thr
         mask = mapp >= thr_i
         batch_mask_all[sample_num] = mask.float()
-        
+
         if sim <= thr_01:
             batch_mask[sample_num] = mask.float()
             pred_lab.append(1)
         else:
             pred_lab.append(0)
-           
-            
-        
 
     return batch_mask, batch_mask_all, torch.tensor(pred_lab), batch_map
-
-
-
 
 
 # %% For non-dynamical threshold to obtain pred_mask (other comparison methods)
@@ -293,9 +291,9 @@ def obtain_optimal_threshold(
                 [args.sample_steps - 1] * source_val.shape[0], device=device
             )
             ep = noise_fn(source_val, t) if noise_fn else None
-    
+
             noise = diffusion.q_sample(source_val, t=t, noise=ep)
-            
+
         # if guided, y will be used to guide the sampling process
         if guided:
             y = torch.ones(source_val.shape[0], dtype=torch.long) * torch.arange(

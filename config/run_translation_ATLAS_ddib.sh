@@ -46,7 +46,7 @@ do
         for sample_steps in 350   # you can change this to other values in validation set (grid search)
         do
             
-            export OPENAI_LOGDIR="./logs_ATLAS/translation_ddib_${w}_${sample_steps}_${model_num}_weighted"
+            export OPENAI_LOGDIR="./logs_ATLAS/translation_ddib_${w}_${sample_steps}_${model_num}_weighted_all"
             echo $OPENAI_LOGDIR
             data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
             model_dir="./logs/logs_atlas_normal_99_11_128/logs_guided_${threshold}_${version}_t1"
@@ -59,8 +59,8 @@ do
                             --num_channels $num_channels --model_num $model_num --ema True\
                             --learn_sigma False"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 10\
-                        --batch_size_val 100 --num_batches_val 10\
+            DATA_FLAGS="--batch_size 100 --num_batches 30\
+                        --batch_size_val 100 --num_batches_val 0\
                         --modality 0"
 
 
@@ -71,19 +71,19 @@ do
                                 --rescale_timesteps False\
                                 --dynamic_clip False"
 
-            DIR_FLAGS="--save_data True --data_dir $data_dir\
+            DIR_FLAGS="--save_data False --data_dir $data_dir\
                         --image_dir $image_dir --model_dir $model_dir"
 
 
             NUM_GPUS=1
-            torchrun --nproc-per-node $NUM_GPUS\
-                        --nnodes=1\
-                        --rdzv-backend=c10d\
-                        --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-                    ./scripts/translation_DDIB.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
-
             # torchrun --nproc-per-node $NUM_GPUS\
+            #             --nnodes=1\
+            #             --rdzv-backend=c10d\
+            #             --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
             #         ./scripts/translation_DDIB.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
+
+            torchrun --nproc-per-node $NUM_GPUS\
+                    ./scripts/translation_DDIB.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
         done
     done
 done

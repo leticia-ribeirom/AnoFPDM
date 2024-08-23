@@ -46,7 +46,7 @@ def evaluate(
     recall_batch = recall(real_mask, recon_mask)
     fpr, tpr, _ = ROC_AUC(source, real_mask, ano_map)
     AUC_score_batch = auc(fpr, tpr)
-    PR_AUC_score_batch = PR_AUC_score(source, real_mask, ano_map)
+    AUPRC_score_batch = AUPRC_score(source, real_mask, ano_map)
 
     return {
         "dice": dice_batch,
@@ -54,7 +54,7 @@ def evaluate(
         "precision": precision_batch,
         "recall": recall_batch,
         "AUC": AUC_score_batch,
-        "PR_AUC": PR_AUC_score_batch,
+        "AUPRC": AUPRC_score_batch,
     }
 
 
@@ -100,7 +100,7 @@ def ROC_AUC(source, real_mask, ano_map):
     )
 
 
-def PR_AUC_score(source, real_mask, ano_map):
+def AUPRC_score(source, real_mask, ano_map):
     # note that source is rescaled to [-1, 1]
     # you can find the region with mean intensity > -0.95 for prauc
     # you can also comment the following line to calculate prauc for the whole image
@@ -119,13 +119,15 @@ def AUC_score(fpr, tpr):
 
 # image-level classification metrics
 def get_stats(Y, PRED_Y):
+    y_curr = Y[-1]
     Y = torch.cat(Y, dim=0)
     PRED_Y = torch.cat(PRED_Y, dim=0)
     acc = torch.sum(Y == PRED_Y).float() / Y.shape[0]
     re = recall(Y, PRED_Y)
     pr = precision(Y, PRED_Y)
     num_ano = torch.where(Y == 1)[0].shape[0]
-    return {"acc": acc.item(), "recall": re, "precision": pr, "num_ano": num_ano}
+    num_ano_curr = torch.where(y_curr == 1)[0].shape[0]
+    return {"acc": acc.item(), "recall": re, "precision": pr, "num_ano_total": num_ano, "num_ano_curr": num_ano_curr}
 
 
 def median_pool(ano_map, kernel_size=5, stride=1, padding=2):
@@ -165,3 +167,87 @@ def connected_components_3d(volume, thr=20):
     if is_torch:
         volume = torch.from_numpy(volume).to(device)
     return volume
+
+class logging_metrics:
+    def __init__(self, logger):
+        self.DICE = []
+        self.DICE_ANO = []
+        self.IOU = []
+        self.IOU_ANO = []
+        self.RECALL = []
+        self.RECALL_ANO = []
+        self.PRECISION = []
+        self.PRECISION_ANO = []
+        self.AUC = []
+        self.AUC_ANO = []
+        self.AUPRC = []
+        self.AUPRC_ANO = []
+        self.logger = logger
+     
+    def logging(self, eval_metrics,  eval_metrics_ano, cls_metrics, k):
+        
+        
+        self.DICE.append(eval_metrics["dice"])
+        self.DICE_ANO.append(eval_metrics_ano["dice"]*cls_metrics["num_ano_curr"])
+
+        self.IOU.append(eval_metrics["iou"])
+        self.IOU_ANO.append(eval_metrics_ano["iou"]*cls_metrics["num_ano_curr"])
+
+        self.RECALL.append(eval_metrics["recall"])
+        self.RECALL_ANO.append(eval_metrics_ano["recall"]*cls_metrics["num_ano_curr"])
+
+        self.PRECISION.append(eval_metrics["precision"])
+        self.PRECISION_ANO.append(eval_metrics_ano["precision"]*cls_metrics["num_ano_curr"])
+
+        self.AUC.append(eval_metrics["AUC"])
+        self.AUC_ANO.append(eval_metrics_ano["AUC"]*cls_metrics["num_ano_curr"])
+
+        self.AUPRC.append(eval_metrics["AUPRC"])
+        self.AUPRC_ANO.append(eval_metrics_ano["AUPRC"]*cls_metrics["num_ano_curr"])
+
+        self.logger.log(
+            f"-------------------------------------at batch {k}-----------------------------------------"
+        )
+        self.logger.log(f"mean dice: {eval_metrics['dice']:0.3f}")
+        self.logger.log(f"mean iou: {eval_metrics['iou']:0.3f}")
+        self.logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
+        self.logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
+        self.logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
+        self.logger.log(f"mean pr auc: {eval_metrics['AUPRC']:0.3f}")
+        self.logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        self.logger.log(f"mean dice ano: {eval_metrics_ano['dice']:0.3f}")
+        self.logger.log(f"mean iou ano: {eval_metrics_ano['iou']:0.3f}")
+        self.logger.log(f"mean precision ano: {eval_metrics_ano['precision']:0.3f}")
+        self.logger.log(f"mean recall ano: {eval_metrics_ano['recall']:0.3f}")
+        self.logger.log(f"mean auc ano: {eval_metrics_ano['AUC']:0.3f}")
+        self.logger.log(f"mean pr auc ano: {eval_metrics_ano['AUPRC']:0.3f}")
+        self.logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        self.logger.log(f"running dice: {np.mean(self.DICE):0.3f}")  # keep 3 decimals
+        self.logger.log(f"running iou: {np.mean(self.IOU):0.3f}")
+        self.logger.log(f"running precision: {np.mean(self.PRECISION):0.3f}")
+        self.logger.log(f"running recall: {np.mean(self.RECALL):0.3f}")
+        self.logger.log(f"running auc: {np.mean(self.AUC):0.3f}")
+        self.logger.log(f"running pr auc: {np.mean(self.AUPRC):0.3f}")
+        self.logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        self.logger.log(f"running dice ano: {np.sum(self.DICE_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(f"running iou ano: {np.sum(self.IOU_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(f"running precision ano: {np.sum(self.PRECISION_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(f"running recall ano: {np.sum(self.RECALL_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(f"running auc ano: {np.sum(self.AUC_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(f"running auprc ano: {np.sum(self.AUPRC_ANO)/cls_metrics['num_ano_total']:0.3f}")
+        self.logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )
+        self.logger.log(f"running cls acc: {cls_metrics['acc']:0.3f}")
+        self.logger.log(f"running cls recall: {cls_metrics['recall']:0.3f}")
+        self.logger.log(f"running cls precision: {cls_metrics['precision']:0.3f}")
+        self.logger.log(f"running cls num_ano: {cls_metrics['num_ano_total']}")
+        self.logger.log(
+            "-------------------------------------------------------------------------------------------"
+        )

@@ -19,7 +19,7 @@ from guided_diffusion.script_util import (
 
 from data import get_data_iter
 from obtain_hyperpara import obtain_hyperpara, get_mask_batch_FPDM
-from evaluate import get_stats, evaluate
+from evaluate import get_stats, evaluate, logging_metrics
 
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 
@@ -79,42 +79,39 @@ def main():
             use_weighted_sampler=args.use_weighted_sampler,
         )
 
-        thr_01, abe_min, abe_max = obtain_hyperpara(
+        thr_01, diff_min, diff_max = obtain_hyperpara(
             data_val, diffusion, model, args, dist_util.dev()
         )
-        logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+        logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
     else:
-        logger.log(f"loading hyperparameters for {args.name} ...")
+        logger.log(f"loading hyperparameters for {args.name} with rev_step {args.rev_steps}...")
         if args.name == "brats":
             # model 210000; w = 2; rev_steps = 600
-            thr_01 = 0.9963247179985046
-            abe_min = torch.tensor([0.0006, 0.0003], device=dist_util.dev())
-            abe_max = torch.tensor([0.1254, 0.0964], device=dist_util.dev())
-            logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+            if args.rev_steps == 999:
+                thr_01 = 0.9993147253990173
+                diff_min = torch.tensor([0.0022, 0.0010], device=dist_util.dev())
+                diff_max = torch.tensor([0.0551, 0.0388], device=dist_util.dev())
+            elif args.rev_steps == 600:
+                thr_01 = 0.9963247179985046
+                diff_min = torch.tensor([5.5484e-05, 3.4732e-05], device=dist_util.dev())
+                diff_max = torch.tensor([0.0513, 0.0380], device=dist_util.dev())
+            
+            logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
         elif args.name == "atlas":
             # model 290000; w = 1.5; rev_steps = 600
             thr_01 = 0.9877627491950989
-            abe_min = torch.tensor([0.0024], device=dist_util.dev())
-            abe_max = torch.tensor([0.1162], device=dist_util.dev())
-            logger.log(f"abe_min: {abe_min}, abe_max: {abe_max}, thr_01: {thr_01}")
+            diff_min = torch.tensor([0.0024], device=dist_util.dev())
+            diff_max = torch.tensor([0.1162], device=dist_util.dev())
+            logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
+
 
     logger.log(f"starting to inference ...")
 
-    DICE = [[] for _ in range(len(args.t_e_ratio))]
-    DICE_ANO = [[] for _ in range(len(args.t_e_ratio))]
-    IOU = [[] for _ in range(len(args.t_e_ratio))]
-    IOU_ANO = [[] for _ in range(len(args.t_e_ratio))]
-    RECALL = [[] for _ in range(len(args.t_e_ratio))]
-    RECALL_ANO = [[] for _ in range(len(args.t_e_ratio))]
-    PRECISION = [[] for _ in range(len(args.t_e_ratio))]
-    PRECISION_ANO = [[] for _ in range(len(args.t_e_ratio))]
-    AUC = [[] for _ in range(len(args.t_e_ratio))]
-    AUC_ANO = [[] for _ in range(len(args.t_e_ratio))]
-    PR_AUC = [[] for _ in range(len(args.t_e_ratio))]
-    PR_AUC_ANO = [[] for _ in range(len(args.t_e_ratio))]
+    
+    logging = logging_metrics(logger)
     Y = [[] for _ in range(len(args.t_e_ratio))]
     PRED_Y = [[] for _ in range(len(args.t_e_ratio))]
-
+    
     k = 0
     while k < args.num_batches:
         all_sources = []
@@ -126,6 +123,8 @@ def main():
         k += 1
 
         source, mask, lab = data_test.__iter__().__next__()
+        
+      
 
         logger.log(
             f"translating at batch {k} on rank {dist.get_rank()}, shape {source.shape}..."
@@ -171,8 +170,8 @@ def main():
                 source,
                 args.modality,
                 thr_01,
-                abe_min,
-                abe_max,
+                diff_min,
+                diff_max,
                 args.image_size,
                 median_filter=args.median_filter,
                 device=dist_util.dev(),
@@ -183,89 +182,20 @@ def main():
 
             Y[n].append(lab)
             PRED_Y[n].append(pred_lab)
-
             eval_metrics = evaluate(mask, pred_mask, source, pred_map)
             eval_metrics_ano = evaluate(mask, pred_mask_all, source, pred_map, lab)
             cls_metrics = get_stats(Y[n], PRED_Y[n])
-
-            DICE[n].append(eval_metrics["dice"])
-            DICE_ANO[n].append(eval_metrics_ano["dice"])
-
-            IOU[n].append(eval_metrics["iou"])
-            IOU_ANO[n].append(eval_metrics_ano["iou"])
-
-            RECALL[n].append(eval_metrics["recall"])
-            RECALL_ANO[n].append(eval_metrics_ano["recall"])
-
-            PRECISION[n].append(eval_metrics["precision"])
-            PRECISION_ANO[n].append(eval_metrics_ano["precision"])
-
-            AUC[n].append(eval_metrics["AUC"])
-            AUC_ANO[n].append(eval_metrics_ano["AUC"])
-
-            PR_AUC[n].append(eval_metrics["PR_AUC"])
-            PR_AUC_ANO[n].append(eval_metrics_ano["PR_AUC"])
-
-            logger.log(
-                f"-------------------------------------at batch {k}-----------------------------------------"
-            )
-            logger.log(f"mean dice: {eval_metrics['dice']:0.3f}")
-            logger.log(f"mean iou: {eval_metrics['iou']:0.3f}")
-            logger.log(f"mean precision: {eval_metrics['precision']:0.3f}")
-            logger.log(f"mean recall: {eval_metrics['recall']:0.3f}")
-            logger.log(f"mean auc: {eval_metrics['AUC']:0.3f}")
-            logger.log(f"mean pr auc: {eval_metrics['PR_AUC']:0.3f}")
             logger.log(f"ratio: {ratio}")
-            logger.log(
-                "-------------------------------------------------------------------------------------------"
-            )
-            logger.log(f"mean dice ano: {eval_metrics_ano['dice']:0.3f}")
-            logger.log(f"mean iou ano: {eval_metrics_ano['iou']:0.3f}")
-            logger.log(f"mean precision ano: {eval_metrics_ano['precision']:0.3f}")
-            logger.log(f"mean recall ano: {eval_metrics_ano['recall']:0.3f}")
-            logger.log(f"mean auc ano: {eval_metrics_ano['AUC']:0.3f}")
-            logger.log(f"mean pr auc ano: {eval_metrics_ano['PR_AUC']:0.3f}")
-            logger.log(f"ratio: {ratio}")
-            logger.log(
-                "-------------------------------------------------------------------------------------------"
-            )
-            logger.log(f"running dice: {np.mean(DICE[n]):0.3f}")  # keep 3 decimals
-            logger.log(f"running iou: {np.mean(IOU[n]):0.3f}")
-            logger.log(f"running precision: {np.mean(PRECISION[n]):0.3f}")
-            logger.log(f"running recall: {np.mean(RECALL[n]):0.3f}")
-            logger.log(f"running auc: {np.mean(AUC[n]):0.3f}")
-            logger.log(f"running pr auc: {np.mean(PR_AUC[n]):0.3f}")
-            logger.log(f"ratio: {ratio}")
-            logger.log(
-                "-------------------------------------------------------------------------------------------"
-            )
-            logger.log(f"running dice ano: {np.mean(DICE_ANO[n]):0.3f}")
-            logger.log(f"running iou ano: {np.mean(IOU_ANO[n]):0.3f}")
-            logger.log(f"running precision ano: {np.mean(PRECISION_ANO[n]):0.3f}")
-            logger.log(f"running recall ano: {np.mean(RECALL_ANO[n]):0.3f}")
-            logger.log(f"running auc ano: {np.mean(AUC_ANO[n]):0.3f}")
-            logger.log(f"running pr auc ano: {np.mean(PR_AUC_ANO[n]):0.3f}")
-            logger.log(f"ratio: {ratio}")
-            logger.log(
-                "-------------------------------------------------------------------------------------------"
-            )
-            logger.log(f"running cls acc: {cls_metrics['acc']:0.3f}")
-            logger.log(f"running cls recall: {cls_metrics['recall']:0.3f}")
-            logger.log(f"running cls precision: {cls_metrics['precision']:0.3f}")
-            logger.log(f"running cls num_ano: {cls_metrics['num_ano']}")
-            logger.log(f"ratio: {ratio}")
-            logger.log(
-                "-------------------------------------------------------------------------------------------"
-            )
+            logging.logging(eval_metrics, eval_metrics_ano, cls_metrics, k)
+            
 
             if args.save_data:
                 logger.log("collecting metrics...")
                 for key in all_terms.keys():
-                    terms = xstarts[key]
                     gathered_terms = [
-                        torch.zeros_like(terms) for _ in range(dist.get_world_size())
+                        torch.zeros_like(xstarts[key]) for _ in range(dist.get_world_size())
                     ]
-                    dist.all_gather(gathered_terms, terms)
+                    dist.all_gather(gathered_terms, xstarts[key])
                     all_terms[key].extend(
                         [term.cpu().numpy() for term in gathered_terms]
                     )
@@ -342,8 +272,7 @@ def create_argparser():
         batch_size_val=100,
         d_reverse=True,
         median_filter=True,
-        dynamic_clip=False,
-        tuned=False,
+        dynamic_clip=False, 
         last_only=False,
         subset_interval=-1,
         seed=0,  # reproduce

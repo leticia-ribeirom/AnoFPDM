@@ -82,6 +82,8 @@ def main():
         batch_size=args.batch_size, # global batch size, for each device it will be batch_size // num_devices
         split=args.split,
         ret_lab=args.ret_lab,
+        n_unhealthy_patients=args.n_unhealthy_patients,
+        n_healthy_patients=args.n_healthy_patients,
         logger=logger,
     )
 
@@ -138,8 +140,8 @@ def create_argparser():
         resume_checkpoint="",
         use_fp16=False,
         fp16_scale_growth=1e-3,
-        n_tumour_patients=None,
-        n_healthy_patients=None,
+        n_unhealthy_patients=-1,
+        n_healthy_patients=-1,
         noise_type="gaussian",
         ddpm_sampling=False,
         unet_ver="v2",

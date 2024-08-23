@@ -140,15 +140,15 @@ class BrainDataset(Dataset):
                 for i in range(num_mix)
             ]
         else: # take n_unhealthy_patients and n_healthy_patients
-            assert (n_unhealthy_patients is not None) or (n_healthy_patients is not None)
+            assert (n_unhealthy_patients != -1) or (n_healthy_patients != -1)
             self.n_unhealthy_patients = (
                 n_unhealthy_patients
-                if n_unhealthy_patients is not None
+                if n_unhealthy_patients != -1
                 else len(patient_dirs)
             )
             self.n_healthy_patients = (
                 n_healthy_patients
-                if n_healthy_patients is not None
+                if n_healthy_patients != -1
                 else len(patient_dirs) - self.n_unhealthy_patients
             )
 
@@ -202,7 +202,7 @@ def get_data_iter(
     data_dir,
     batch_size,
     split="train",
-    ret_lab=False,
+    ret_lab=True,
     logger=None,
     n_healthy_patients=None,
     n_unhealthy_patients=None,
@@ -228,7 +228,7 @@ def get_data_iter(
         num_mix=num_mix,
     )
     
-    if (split == "val" and use_weighted_sampler) or (split == "test" and use_weighted_sampler): # for single GPU
+    if (split == "val" and use_weighted_sampler and mixed) or (split == "test" and use_weighted_sampler and mixed): # for single GPU
         labels = [data[i][2] for i in range(len(data))]
 
         class_sample_count = np.array(
@@ -264,15 +264,19 @@ def get_data_iter(
     )
 
      # count the number of samples for each class
-    if logger is not None:
-        if split == "train":
-            labels = [data[i][1]['y'] for i in range(len(data))]
+    if logger is not None and dist.get_rank() == 0:
+        if ret_lab:
+            if split == "train":
+                labels = [data[i][1]['y'] for i in range(len(data))]
+            else:
+                labels = [data[i][2] for i in range(len(data))]
+            class_sample_count = np.array(
+                [(t, len(np.where(labels == t)[0])) for t in np.unique(labels)]
+            )
+            logger.log(f"{name} class sample count: {class_sample_count}")
         else:
-            labels = [data[i][2] for i in range(len(data))]
-        class_sample_count = np.array(
-            [(t, len(np.where(labels == t)[0])) for t in np.unique(labels)]
-        )
-        logger.log(f"{name} class sample count: {class_sample_count}")
+            logger.log(f"{name} sample count: {data.__len__()}")
+    
         
     if split == "train":
         return loader, sampler

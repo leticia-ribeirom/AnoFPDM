@@ -38,7 +38,7 @@ diffusion_steps=1000
 
 noise_type=gaussian
 # sample_steps=300 # for gaussian noise
-model_num=250000 # model steps
+model_num=100000 # model steps
 use_ddpm=False # ddpm or ddim encoding (stochastic or deterministic)
 
 # noise_type=simplex
@@ -46,16 +46,16 @@ use_ddpm=False # ddpm or ddim encoding (stochastic or deterministic)
 # model_num=350000
 # use_ddpm=True
 
-for round in 1 2 3
+for round in 1
 do
-    for sample_steps in 300 
+    for sample_steps in 100 200 250 300 400 
     do
-        export OPENAI_LOGDIR="./logs/translation_anoddpm_${noise_type}_${round}"
+        export OPENAI_LOGDIR="./logs_ATLAS/translation_anoddpm_${noise_type}_${round}"
         echo $OPENAI_LOGDIR
 
-        data_dir="/data/preprocessed_data"
+        data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
        
-        model_dir="./logs/anoddpm_${noise_type}"
+        model_dir="./logs/logs_atlas_normal_99_11_128/logs_anoddpm_${noise_type}"
         
         image_dir="$OPENAI_LOGDIR"
 
@@ -65,9 +65,9 @@ do
                         --num_channels $num_channels --model_num $model_num --ema True\
                         --use_ddpm $use_ddpm --noise_type $noise_type"
 
-        DATA_FLAGS="--batch_size 100 --num_batches 100\
+        DATA_FLAGS="--batch_size 100 --num_batches 1\
                     --batch_size_val 100 --num_batches_val 10\
-                    --modality 0 --seed 0"
+                    --modality 0 --seed 0 --use_weighted_sampler True"
 
 
         DIFFUSION_FLAGS="--diffusion_steps $diffusion_steps\
@@ -82,10 +82,12 @@ do
 
 
         NUM_GPUS=1
+        # torchrun --nproc-per-node $NUM_GPUS\
+        #             --nnodes=1\
+        #             --rdzv-backend=c10d\
+        #             --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
+        #         ./scripts/translation_HEALTHY.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
         torchrun --nproc-per-node $NUM_GPUS\
-                    --nnodes=1\
-                    --rdzv-backend=c10d\
-                    --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-                ./scripts/translation_HEALTHY.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
+                ./scripts/translation_HEALTHY.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
     done
 done

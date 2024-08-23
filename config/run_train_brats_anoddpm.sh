@@ -38,7 +38,7 @@ image_dir="$OPENAI_LOGDIR/images"
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes \
                 --class_cond False --ret_lab False --mixed False
-                --n_tumour_patients 0" # only train on non-tumour slices
+                --n_unhealthy_patients 0" # only train on non-tumour slices
 
 MODEL_FLAGS="--unet_ver v1\
             --in_channels $in_channels \
