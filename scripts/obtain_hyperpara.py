@@ -39,7 +39,7 @@ def cal_cos_and_abe_range(mse_flat, mse_null_flat, diff_flat, lab):
 
     diff_1 = diff_flat[torch.where(lab == 1)[0]]  # N_val_1 x sample_steps x n_modality
     diff_max = torch.max(diff_1, dim=1)[0]  # N_val_1 x n_modality
-    return thr_01, diff_max.min(dim=0)[0], diff_max.max(dim=0)[0]
+    return thr_01, diff_max.min(dim=0)[0], diff_max.max(dim=0)[0], n_min
 
 
 def obtain_hyperpara(data_val, diffusion, model, args, device):
@@ -72,7 +72,7 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
             args.w,
             modality=args.modality,
             d_reverse=args.d_reverse,
-            sample_steps=args.rev_steps,
+            sample_steps=args.forward_steps,
             model_kwargs=model_kwargs,
             model_kwargs_reverse=model_kwargs_reverse,
         )
@@ -101,8 +101,8 @@ def obtain_hyperpara(data_val, diffusion, model, args, device):
     MSE_NULL = torch.cat(MSE_NULL, dim=0)
     DIFF = torch.cat(DIFF, dim=0)
     LAB = torch.cat(LAB, dim=0)
-    thr_01, diff_min, diff_max = cal_cos_and_abe_range(MSE, MSE_NULL, DIFF, LAB)
-    return thr_01, diff_min, diff_max
+    thr_01, diff_min, diff_max, n_min = cal_cos_and_abe_range(MSE, MSE_NULL, DIFF, LAB)
+    return thr_01, diff_min, diff_max, n_min
 
 
 def get_mask_batch_FPDM(
@@ -118,8 +118,13 @@ def get_mask_batch_FPDM(
     t_e=None,
     t_e_ratio=1,
     median_filter=True,
+    # for ablation study
     last_only=False,
+    use_gradient_sam=False,
     interval=-1,
+    forward_steps=None,
+    diffusion_steps=None,
+    w=None,
 ):
     """
     thr_01: threshold for cosine similarity (healthy or unhealthy)
@@ -129,11 +134,27 @@ def get_mask_batch_FPDM(
     mse_null: batch_size x sample_steps x n_modality x H x W 
     """
     # sub-anomaly maps for aggregation
-    mse = (
-        xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)
-    ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
+    if not use_gradient_sam:
+        mse = (
+            xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)
+        ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
+    else:
+        assert forward_steps is not None
+        assert diffusion_steps is not None
+        assert w is not None
+        beta_start = 0.0001
+        beta_end = 0.02
+        betas = np.linspace(beta_start, beta_end, diffusion_steps, dtype=np.float64)
+        alphas = 1.0 - betas
+        alphas_cumprod = np.cumprod(alphas, axis=0)
+        sqrt_alphas_cumprod = np.sqrt(alphas_cumprod)
+        sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - alphas_cumprod)
 
-    # mse = (xstarts["xstart"] - xstarts["xstart_null"]) ** 2
+        Bt = (sqrt_one_minus_alphas_cumprod)**2 / sqrt_alphas_cumprod 
+        Bt = Bt[:forward_steps]
+        mse = (xstarts["xstart"] - xstarts["xstart_null"]) ** 2
+        mse = mse / (Bt**2)[None, :, None, None, None] / (1+w)**2
+
     # for cosine similarity
     mse_flat = torch.mean(
         (xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)) ** 2, dim=(2, 3, 4)
@@ -156,6 +177,7 @@ def get_mask_batch_FPDM(
     quant_range = torch.flip(torch.linspace(0.90, 0.98, 101), dims=(0,)).to(device)
 
     pred_lab = []
+    end_steps = []
     for sample_num in range(diff_flat.shape[0]):
         # get the cosine similarity between mse and mse_null
         sim = cos(
@@ -179,7 +201,7 @@ def get_mask_batch_FPDM(
 
         if t_e_ratio != 1:
             t_e_i = torch.round(t_e_i * t_e_ratio).to(torch.int64)
-
+            end_steps.append(t_e_i)
         if last_only:
             t_s_i = t_e_i - 1
             assert interval == -1  # no interval for last_only
@@ -229,7 +251,7 @@ def get_mask_batch_FPDM(
         else:
             pred_lab.append(0)
 
-    return batch_mask, batch_mask_all, torch.tensor(pred_lab), batch_map
+    return batch_mask, batch_mask_all, torch.tensor(pred_lab), batch_map, torch.tensor(end_steps)
 
 
 # %% For non-dynamical threshold to obtain pred_mask (other comparison methods)

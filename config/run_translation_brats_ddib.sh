@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public 
             
-#SBATCH -t 00-01:00:00               
+#SBATCH -t 01-00:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -26,6 +26,7 @@ w_reverse=-1
 num_classes=2
 in_channels=4
 num_channels=128
+seed=0 # for data loader only
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -41,16 +42,15 @@ version=v2
 
 for model_num in 210000
 do
-    for w in 1.1 # you can change this to other values in validation set (grid search)
+    for w in 1.1 1.2 1.4 1.6 1.8 2.0 2.2 # you can change this to other values in validation set (grid search)
     do
-        for sample_steps in 450 # you can change this to other values in validation set (grid search)
+        for sample_steps in 300 400 450 500 # you can change this to other values in validation set (grid search)
         do
             
-            export OPENAI_LOGDIR="./logs/translation_ddib_${w}_${sample_steps}_${model_num}"
+            export OPENAI_LOGDIR="./brats_tune/translation_ddib_${w}_${sample_steps}_${model_num}"
             echo $OPENAI_LOGDIR
-            data_dir="/data/preprocessed_data"
-            model_dir="./logs/clf_free_guided"
-           
+            data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
+            model_dir="./logs/logs_brats_normal_99_11_128/logs_guided_${threshold}_all_00_${version}_128_norm"
             image_dir="$OPENAI_LOGDIR"
 
             MODEL_FLAGS="--unet_ver $version --image_size $image_size --num_classes $num_classes \
@@ -59,9 +59,9 @@ do
                             --num_channels $num_channels --model_num $model_num --ema True\
                             --learn_sigma False"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 100\
+            DATA_FLAGS="--batch_size 100 --num_batches 1\
                         --batch_size_val 100 --num_batches_val 10\
-                        --modality 0 3"
+                        --modality 0 3 --use_weighted_sampler False --seed $seed"
 
 
             DIFFUSION_FLAGS="--diffusion_steps $diffusion_steps\

@@ -26,7 +26,6 @@ noise_type=gaussian
 in_channels=4
 batch_size=32
 save_interval=10000
-
 num_classes=0 # unguided
 image_size=128
 

@@ -70,7 +70,7 @@ torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\
          --rdzv-backend=c10d\
          --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-        ./scripts/train.py --name ATLAS $DATA_FLAGS $MODEL_FLAGS $DIFFUSION_FLAGS $TRAIN_FLAGS $GUI_FLAGS $EVA_FLAGS 
+        ./scripts/train.py --name atlas $DATA_FLAGS $MODEL_FLAGS $DIFFUSION_FLAGS $TRAIN_FLAGS $GUI_FLAGS $EVA_FLAGS 
 
 
 

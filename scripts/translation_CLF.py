@@ -89,8 +89,10 @@ def main():
             cond_fn=cond_fn,
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
+    else:
+        opt_thr = 0.63 # atlas 200 500
 
-    
+    logging = logging_metrics(logger) 
     Y = []
     PRED_Y = []
 
@@ -154,7 +156,7 @@ def main():
         eval_metrics_ano = evaluate(mask, pred_mask, source, pred_map, lab)
         cls_metrics = get_stats(Y, PRED_Y)
 
-        logging_metrics(eval_metrics, eval_metrics_ano, cls_metrics, logger, k)
+        logging.logging(eval_metrics, eval_metrics_ano, cls_metrics, k)
 
         if args.save_data:
             logger.log("collecting metrics...")

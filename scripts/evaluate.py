@@ -55,6 +55,7 @@ def evaluate(
         "recall": recall_batch,
         "AUC": AUC_score_batch,
         "AUPRC": AUPRC_score_batch,
+        "recon_mask": recon_mask,
     }
 
 

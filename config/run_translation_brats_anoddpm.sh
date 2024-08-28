@@ -35,11 +35,12 @@ echo $MASTER_PORT
 
 w=-1 # unguided
 diffusion_steps=1000
+seed=0 # for data loader only
 
 noise_type=gaussian
 # sample_steps=300 # for gaussian noise
 model_num=250000 # model steps
-use_ddpm=False # ddpm or ddim encoding (stochastic or deterministic)
+use_ddpm=False # ddpm or ddim sampling 
 
 # noise_type=simplex
 # # sample_steps=200 # for simplex noise
@@ -67,7 +68,7 @@ do
 
         DATA_FLAGS="--batch_size 100 --num_batches 100\
                     --batch_size_val 100 --num_batches_val 10\
-                    --modality 0 3 --seed 0"
+                    --modality 0 3 --seed $seed --use_weighted_sampler False"
 
 
         DIFFUSION_FLAGS="--diffusion_steps $diffusion_steps\

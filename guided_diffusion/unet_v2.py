@@ -617,8 +617,8 @@ class UNetModel(nn.Module):
                     cemb = self.class_emb(self.label_emb(y)) 
                 cemb_mm = th.einsum("ab,ac -> abc", cemb, cemb) 
             # for non-clf-free condition embedding, e.g., classifier guided sampling
-            elif threshold == -1 and not clf_free:
-                cemb = self.label_emb(y)
+            # elif threshold == -1 and not clf_free:
+            #     cemb = self.label_emb(y)
             else:
                 raise Exception("Invalid condition setup")
                 

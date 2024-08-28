@@ -20,8 +20,8 @@ module load mamba/latest
 source activate torch_base
 
 
-noise_type=simplex
-# noise_type=gaussian
+# noise_type=simplex
+noise_type=gaussian
 
 in_channels=1
 batch_size=64
@@ -35,6 +35,8 @@ export OPENAI_LOGDIR="./logs/logs_atlas_normal_99_11_128/logs_anoddpm_${noise_ty
 # data directory
 data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
 image_dir="$OPENAI_LOGDIR/images"
+# resume from checkpoint
+resume_checkpoint=$OPENAI_LOGDIR/model106100.pt
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes \
                 --class_cond False --ret_lab False --mixed False
@@ -45,7 +47,7 @@ MODEL_FLAGS="--unet_ver v1\
              --num_channels 128 \
              --attention_resolutions 32,16,8 \
              --learn_sigma False\
-             --dropout 0"
+             --dropout 0 --resume_checkpoint $resume_checkpoint"
 
 DIFFUSION_FLAGS="--diffusion_steps 1000\
                 --noise_type $noise_type \
@@ -53,11 +55,11 @@ DIFFUSION_FLAGS="--diffusion_steps 1000\
                     --rescale_learned_sigmas False \
                     --rescale_timesteps False"
 
-TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size"
+TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir \
+            --batch_size $batch_size --total_epochs 300"
 
 
-EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size \
-            --timestep_respacing ddim1000" # ignore this for non-gaussian noise and we use ddpm sampling for visual checking
+EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size"
 
 
 # slurm setup
@@ -74,7 +76,7 @@ torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\
          --rdzv-backend=c10d\
          --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-        ./scripts/train.py --name ATLAS \
+        ./scripts/train.py --name atlas \
                             $DATA_FLAGS $MODEL_FLAGS $DIFFUSION_FLAGS $TRAIN_FLAGS $GUI_FLAGS $EVA_FLAGS 
 
 

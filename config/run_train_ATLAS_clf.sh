@@ -52,5 +52,5 @@ torchrun --nproc-per-node $NUM_GPUS \
          --nnodes=1\
          --rdzv-backend=c10d\
          --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-        ./scripts/train_classifier.py --name ATLAS --save_interval 5000\
+        ./scripts/train_classifier.py --name atlas --save_interval 5000\
                                     $CLASSIFIER_FLAGS

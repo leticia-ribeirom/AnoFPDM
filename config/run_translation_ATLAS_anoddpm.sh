@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public
             
-#SBATCH -t 00-05:00:00               
+#SBATCH -t 0-12:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -25,6 +25,7 @@ image_size=128
 num_classes=0
 in_channels=1
 num_channels=128
+seed=0 # for data loader only
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -38,19 +39,27 @@ diffusion_steps=1000
 
 noise_type=gaussian
 # sample_steps=300 # for gaussian noise
-model_num=100000 # model steps
-use_ddpm=False # ddpm or ddim encoding (stochastic or deterministic)
+model_num=226100 # model steps
+use_ddpm=False # ddpm or ddim sampling 
 
 # noise_type=simplex
 # # sample_steps=200 # for simplex noise
 # model_num=350000
 # use_ddpm=True
 
-for round in 1
+if [ $use_ddpm = "True" ]
+then
+    model_name="anoddpm"
+else
+    model_name="anoddim"
+fi
+
+
+for round in 1 2 3
 do
-    for sample_steps in 100 200 250 300 400 
+    for sample_steps in 100 
     do
-        export OPENAI_LOGDIR="./logs_ATLAS/translation_anoddpm_${noise_type}_${round}"
+        export OPENAI_LOGDIR="./logs_atlas/translation_${model_name}_${noise_type}_${sample_steps}_${round}"
         echo $OPENAI_LOGDIR
 
         data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
@@ -65,9 +74,9 @@ do
                         --num_channels $num_channels --model_num $model_num --ema True\
                         --use_ddpm $use_ddpm --noise_type $noise_type"
 
-        DATA_FLAGS="--batch_size 100 --num_batches 1\
-                    --batch_size_val 100 --num_batches_val 10\
-                    --modality 0 --seed 0 --use_weighted_sampler True"
+        DATA_FLAGS="--batch_size 100 --num_batches 40\
+                    --batch_size_val 100 --num_batches_val 0\
+                    --modality 0 --seed $seed --use_weighted_sampler False"
 
 
         DIFFUSION_FLAGS="--diffusion_steps $diffusion_steps\
@@ -82,12 +91,12 @@ do
 
 
         NUM_GPUS=1
-        # torchrun --nproc-per-node $NUM_GPUS\
-        #             --nnodes=1\
-        #             --rdzv-backend=c10d\
-        #             --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-        #         ./scripts/translation_HEALTHY.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
         torchrun --nproc-per-node $NUM_GPUS\
+                    --nnodes=1\
+                    --rdzv-backend=c10d\
+                    --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
                 ./scripts/translation_HEALTHY.py --name ATLAS $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
+        # torchrun --nproc-per-node $NUM_GPUS\
+        #         ./scripts/translation_HEALTHY.py --name atlas $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
     done
 done

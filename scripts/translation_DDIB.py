@@ -88,10 +88,10 @@ def main():
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
     else:
-        opt_thr = 0.44  # atlas 1000 350 290000 w=1.5
+        opt_thr = 0.52  # atlas 1000 300 290000 w=1.3
         logger.log(f"optimal threshold: {opt_thr}")
 
-  
+    logging = logging_metrics(logger)
     Y = []
     PRED_Y = []
 
@@ -163,7 +163,7 @@ def main():
         )
         cls_metrics = get_stats(Y, PRED_Y)
 
-        logging_metrics(eval_metrics, eval_metrics_ano, cls_metrics, logger, k)
+        logging.logging(eval_metrics, eval_metrics_ano, cls_metrics, k)
 
         if args.save_data:
             logger.log("collecting metrics...")
@@ -239,7 +239,7 @@ def create_argparser():
         num_batches_val=2,
         batch_size_val=100,
         cc_filter=True,
-        use_weighted_sampler=True,
+        use_weighted_sampler=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

@@ -29,7 +29,6 @@ version=v1 # unet version
 
 # log directory
 export OPENAI_LOGDIR="./logs/clf_guided"
-
 # data directory
 data_dir="/data/preprocessed_data"
 # saved images directory, visual check

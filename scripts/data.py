@@ -1,12 +1,8 @@
 import torch
 import random
-from random import randint
 from pathlib import Path
 import numpy as np
-import nibabel as nib
-from tqdm import tqdm
 import os
-import logging
 from torch.utils.data import (
     Dataset,
     DataLoader,
@@ -15,10 +11,7 @@ from torch.utils.data import (
     RandomSampler,
     DistributedSampler,
 )
-from torchvision import transforms, datasets
-import torch.nn.functional as F
 from torchvision.utils import make_grid, save_image
-from torchvision import transforms, datasets
 import torch.distributed as dist
 
 
@@ -209,7 +202,8 @@ def get_data_iter(
     mixed=False,
     num_mix=None,
     seed=0,
-    use_weighted_sampler=True,
+    use_weighted_sampler=False,
+    distributed=True, # for distributed training
 ):
 
     # torch.random.manual_seed(seed)
@@ -242,7 +236,7 @@ def get_data_iter(
         sampler = WeightedRandomSampler(
             samples_weight, len(samples_weight), replacement=False, generator=rng
         )
-    elif split == "train":
+    elif split == "train" and distributed:
         sampler = DistributedSampler(
             data,
             num_replicas=dist.get_world_size(),
@@ -278,7 +272,7 @@ def get_data_iter(
             logger.log(f"{name} sample count: {data.__len__()}")
     
         
-    if split == "train":
+    if split == "train" and distributed:
         return loader, sampler
     return loader
 
@@ -310,33 +304,34 @@ def check_data(loader, image_dir, split="train", name="brats"):
 
 
 if __name__ == "__main__":
-  
-    # data_dir = "/data/amciilab/yiming/DATA/mmbrain/preprocessed_data_all_00_128"
-    # data_dir = "/data/amciilab/yiming/DATA/MSLUB/preprocessed_data_flair_5656" 
-    data_dir = "/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
-    data = get_data_iter(
-        'atlas',
-        data_dir,
-        128,
-        split="test",
-        mixed=True,
-        ret_lab=True,
-    )
-    samples, gt, lab = data.__iter__().__next__()
-    print("batch shape: ", samples.shape)
-    print("sample shape: ", samples[0].shape)
-    print("gt: ", gt.shape)
-    print("lab: ", lab.shape)
-    print("lab: ", lab)
+    # test ATLAS dataset
+    atlas_data_dir = "/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
+    brats_data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
+    # atls train loader
+    # set distributed=False if not using distributed training
+    atlas_data_train = get_data_iter(name='atlas', data_dir=atlas_data_dir, batch_size=128, 
+                                    split="train", mixed=True, ret_lab=True, distributed=False)                      
+    # atlas val loader
+    atlas_data_val = get_data_iter(name='atlas', data_dir=atlas_data_dir, batch_size=128, 
+                                   split="val", mixed=True, ret_lab=True)
+    # atlas test loader
+    atlas_data_test = get_data_iter(name='atlas', data_dir=atlas_data_dir, batch_size=128, 
+                                    split="test", mixed=True, ret_lab=True)
+    
+    samples_train, lab_train = atlas_data_train.__iter__().__next__() # for train split, lab is returned as a dictionary with key 'y'
+    samples_val, gt_val, lab_val = atlas_data_val.__iter__().__next__() # for val and test split, lab is returned as a tensor
+    samples_test, gt_test, lab_test = atlas_data_test.__iter__().__next__()
+    print("batch shape: ", samples_train.shape)
+    print("sample shape: ", samples_train[0].shape)
+    print("gt: ", gt_val.shape)
+    print("lab_val: ", lab_val.shape)
+    print("lab_test: ", lab_test.shape)
+    
+    # note that the samples are normalized to [-1, 1]
+    print("channel 1 max: ", samples_train[0][0].max())
+    print("channel 1 min: ", samples_train[0][0].min())
 
-    # print('slice_num: ', slice_num[0])
-    print("channel 1 max: ", samples[0][0].max())
-    print("channel 1 min: ", samples[0][0].min())
-    # print('channel 2 max: ', samples[0][1].max())
-    # print('channel 2 min: ', samples[0][1].min())
-    # print('channel 3 max: ', samples[0][2].max())
-    # print('channel 3 min: ', samples[0][2].min())
-    # print('channel 4 max: ', samples[0][3].max())
-    # print('channel 4 min: ', samples[0][3].min())
-
-    check_data(data, split="test", image_dir="./", name="atlas")
+    check_data(samples_test, split="test", image_dir="./", name="atlas_check")
+    
+    # for BraTS dataset, setups are exactly same as ATLAS dataset. 'name' argument is used for logging purpose only and can be any string
+    # brats dataset have 4 channels not 1 channel

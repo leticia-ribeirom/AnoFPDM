@@ -991,7 +991,7 @@ class GaussianDiffusion:
         model,
         x_start,
         w,
-        modality=0,  # 0:flair, 1:t1, 2:t1ce, 3:t2
+        modality=0,  # 0:flair, 1:t1, 2:t1ce, 3:t2 (BRATS) 0:t1 (ATLAS)
         d_reverse=False,
         sample_steps=None,
         clip_denoised=True,
@@ -1003,7 +1003,7 @@ class GaussianDiffusion:
         Compute the predicted x_0 for guided (healthy) and unguided for each time step.
 
         :param model: the model to evaluate loss on.
-        :param d_reverse: if True, use reverse ddim style.
+        :param d_reverse: if True, use ddim (deterministic) encoding else ddpm stochastic encoding.
         :param clip_denoised: if True, clip denoised samples.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.

@@ -79,30 +79,33 @@ def main():
             use_weighted_sampler=args.use_weighted_sampler,
         )
 
-        thr_01, diff_min, diff_max = obtain_hyperpara(
+        thr_01, diff_min, diff_max, n_min = obtain_hyperpara(
             data_val, diffusion, model, args, dist_util.dev()
         )
-        logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
+        logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}, n_min: {n_min}")
     else:
-        logger.log(f"loading hyperparameters for {args.name} with rev_step {args.rev_steps}...")
+        logger.log(f"loading hyperparameters for {args.name} with forward_steps {args.forward_steps}...")
         if args.name == "brats":
-            # model 210000; w = 2; rev_steps = 600
-            if args.rev_steps == 999:
+            # model 210000; w = 2; forward_steps = 600
+            if args.forward_steps == 999:
                 thr_01 = 0.9993147253990173
                 diff_min = torch.tensor([0.0022, 0.0010], device=dist_util.dev())
                 diff_max = torch.tensor([0.0551, 0.0388], device=dist_util.dev())
-            elif args.rev_steps == 600:
+            elif args.forward_steps == 600:
                 thr_01 = 0.9963247179985046
                 diff_min = torch.tensor([5.5484e-05, 3.4732e-05], device=dist_util.dev())
                 diff_max = torch.tensor([0.0513, 0.0380], device=dist_util.dev())
             
-            logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
         elif args.name == "atlas":
-            # model 290000; w = 1.5; rev_steps = 600
-            thr_01 = 0.9877627491950989
-            diff_min = torch.tensor([0.0024], device=dist_util.dev())
-            diff_max = torch.tensor([0.1162], device=dist_util.dev())
-            logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
+            # model 290000; w = 1.2; forward_steps = 600; unweighted
+            # thr_01 = 0.9918085336685181
+            # diff_min = torch.tensor([0.0003], device=dist_util.dev())
+            # diff_max = torch.tensor([0.0234], device=dist_util.dev())
+            # w = 2; 
+            thr_01 = 0.9772974848747253
+            diff_min = torch.tensor([0.0009], device=dist_util.dev())
+            diff_max = torch.tensor([0.0602], device=dist_util.dev())
+        logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
 
 
     logger.log(f"starting to inference ...")
@@ -157,7 +160,7 @@ def main():
             args.w,
             modality=args.modality,
             d_reverse=args.d_reverse,
-            sample_steps=args.rev_steps,
+            sample_steps=args.forward_steps,
             model_kwargs=model_kwargs0,
             model_kwargs_reverse=model_kwargs_reverse,
             dynamic_clip=args.dynamic_clip,
@@ -165,7 +168,7 @@ def main():
 
         # collect metrics
         for n, ratio in enumerate(args.t_e_ratio):
-            pred_mask, pred_mask_all, pred_lab, pred_map = get_mask_batch_FPDM(
+            pred_mask, pred_mask_all, pred_lab, pred_map, _ = get_mask_batch_FPDM(
                 xstarts,
                 source,
                 args.modality,
@@ -178,8 +181,12 @@ def main():
                 t_e_ratio=ratio,
                 last_only=args.last_only,
                 interval=args.subset_interval,
+                use_gradient_sam=args.use_gradient_sam,
+                forward_steps=args.forward_steps,
+                diffusion_steps=args.diffusion_steps,
+                w=args.w,
             )
-
+            
             Y[n].append(lab)
             PRED_Y[n].append(pred_lab)
             eval_metrics = evaluate(mask, pred_mask, source, pred_map)
@@ -263,20 +270,21 @@ def create_argparser():
         image_dir="",
         model_dir="",
         batch_size=32,
-        rev_steps=600,
+        forward_steps=600,
         model_num=None,
         ema=False,
         null=False,
         save_data=False,
         num_batches_val=2,
         batch_size_val=100,
-        d_reverse=True,
+        d_reverse=True, # deterministic encoding or not
         median_filter=True,
         dynamic_clip=False, 
         last_only=False,
         subset_interval=-1,
         seed=0,  # reproduce
         use_weighted_sampler=False,
+        use_gradient_sam=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
