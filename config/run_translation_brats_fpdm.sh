@@ -7,9 +7,9 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64G
 #SBATCH -p general                
-#SBATCH -q grp_twu02 
+#SBATCH -q public
             
-#SBATCH -t 01-00:00:00               
+#SBATCH -t 01-15:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -40,10 +40,11 @@ version=v2
 
 d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding) 
                 # or will be ddpm reverse (stochastic encoding)
-for w in 2
+w=2
+for round in 1
 do
     
-    export OPENAI_LOGDIR="./logs_brats/translation_fpdm_${w}_${model_num}_${forward_steps}_last"
+    export OPENAI_LOGDIR="./logs_brats/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1"
     echo $OPENAI_LOGDIR
 
     data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
@@ -55,8 +56,8 @@ do
                     --num_channels $num_channels --model_num $model_num --ema True\
                     --forward_steps $forward_steps --d_reverse $d_reverse" 
 
-    DATA_FLAGS="--batch_size 100 --num_batches 50 \
-                --batch_size_val 100 --num_batches_val 0\
+    DATA_FLAGS="--batch_size 100 --num_batches 100 \
+                --batch_size_val 100 --num_batches_val 10\
                 --modality 0 3 --use_weighted_sampler False --seed $seed"
 
     DIFFUSION_FLAGS="--null True \
@@ -67,7 +68,7 @@ do
 
     DIR_FLAGS="--save_data False --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
 
-    ABLATION_FLAGS="--last_only True --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
+    ABLATION_FLAGS="--last_only False --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
 
 
     NUM_GPUS=1
@@ -76,8 +77,4 @@ do
                 --rdzv-backend=c10d\
                 --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
             ./scripts/translation_FPDM.py --name brats $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
-
-    # torchrun --nproc-per-node $NUM_GPUS \
-    #         ./scripts/translation_FPDM.py --name brats $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
-
 done

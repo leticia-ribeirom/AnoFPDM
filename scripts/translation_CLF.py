@@ -90,9 +90,9 @@ def main():
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
     else:
-        opt_thr = 0.63 # atlas 200 500
+        opt_thr = 0.63  # atlas 200 500
 
-    logging = logging_metrics(logger) 
+    logging = logging_metrics(logger)
     Y = []
     PRED_Y = []
 
@@ -131,6 +131,10 @@ def main():
             [args.sample_steps - 1] * source.shape[0], device=dist_util.dev()
         )
         noise = diffusion.q_sample(source, t=t)
+        # model_kwargs_reverse = {"uncond": True}
+        # noise = diffusion.ddim_reverse_sample(
+        #     model, source, t=t, model_kwargs=model_kwargs_reverse
+        # )
 
         target, _ = sample(
             model,
@@ -142,6 +146,7 @@ def main():
             sample_shape=source.shape,
             sample_steps=args.sample_steps,
             normalize_img=False,
+            ddpm=False,
         )
 
         if args.num_batches_val == 0:

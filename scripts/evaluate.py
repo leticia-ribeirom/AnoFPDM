@@ -21,14 +21,14 @@ def evaluate(
     recon_mask: torch.Tensor,
     source: torch.Tensor,
     ano_map: torch.Tensor,
-    label: torch.Tensor = None,
+    label: torch.Tensor = None, 
     cc_filter=True,
 ):
     """
     real_mask: [b, 1, h, w]; recon_mask: [b, 1, h, w];
     ano_map: [b, 1, h, w]; source: [b, n_mod, h, w]
     label: [b] - 0 for normal, 1 for anomalous, image-level label
-    if label is not none, only evaluate on anomalous samples
+    if label is not none, only evaluate on anomalous samples, for unhealthy-only settings
     Rerurn a dict of average metrics (float) for each batch
     """
     if label is not None:
@@ -38,7 +38,7 @@ def evaluate(
         ano_map = ano_map[torch.where(label == 1)[0], ...]
 
     if cc_filter:
-        recon_mask = connected_components_3d(recon_mask, thr=40)
+        recon_mask = connected_components_3d(recon_mask, thr=40) # post-processed by connected components
 
     dice_batch = dice_coeff(real_mask, recon_mask)
     iou_batch = IoU(real_mask, recon_mask)
@@ -252,3 +252,4 @@ class logging_metrics:
         self.logger.log(
             "-------------------------------------------------------------------------------------------"
         )
+        

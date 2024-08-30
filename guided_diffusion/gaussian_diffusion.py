@@ -1026,22 +1026,32 @@ class GaussianDiffusion:
 
             # Calculate predicted x_0 at the current timestep
             with th.no_grad():
+                noise = th.randn_like(x_start)
                 if not d_reverse:
-                    noise = th.randn_like(x_start)
                     x_t = self.q_sample(x_start=x_start, t=t_batch, noise=noise)
                 else:
-                    if t % 100 == 0:
-                        print("t = ", t)
-                    x_t = x_start if x_t is None else x_t
-                    out_re = self.ddim_reverse_sample(
-                        model,
-                        x=x_t,
-                        t=t_batch,
-                        clip_denoised=clip_denoised,
-                        model_kwargs=model_kwargs_reverse,
-                    )
+                    if t == 0:
+                        x_t = self.q_sample(x_start=x_start, t=t_batch, noise=noise) # x_1
+                    else:
+                        out_re = self.ddim_reverse_sample(
+                            model,
+                            x=x_t,
+                            t=t_batch,
+                            clip_denoised=clip_denoised,
+                            model_kwargs=model_kwargs_reverse,
+                        )
 
-                    x_t = out_re["sample"]
+                        x_t = out_re["sample"]
+                        
+                    # x_t = x_start if x_t is None else x_t
+                    # out_re = self.ddim_reverse_sample(
+                    #     model,
+                    #     x=x_t,
+                    #     t=t_batch,
+                    #     clip_denoised=clip_denoised,
+                    #     model_kwargs=model_kwargs_reverse,
+                    # )
+                    # x_t = out_re["sample"]
 
                 out = self.ddim_sample(
                     model,
@@ -1063,7 +1073,7 @@ class GaussianDiffusion:
                     denoised_fn=clamp_to_spatial_quantile if dynamic_clip else None,
                     eta=0.0,
                     w=-1,
-                )  # shut down classifier-free guidance)
+                )  # shut down classifier-free guidance
 
             xstart.append(out["pred_xstart"][:, modality, ...])
             xstart_null.append(out_null["pred_xstart"][:, modality, ...])

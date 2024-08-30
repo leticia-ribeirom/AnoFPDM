@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public
             
-#SBATCH -t 1-00:00:00               
+#SBATCH -t 0-15:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -39,10 +39,12 @@ version=v2
 
 d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding) 
                 # or will be ddpm reverse (stochastic encoding)
-for w in 2
+
+w=2
+for round in 3
 do
     
-    export OPENAI_LOGDIR="./logs_atlas/translation_fpdm_${w}_${model_num}_${forward_steps}_last"
+    export OPENAI_LOGDIR="./logs_atlas/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1"
     echo $OPENAI_LOGDIR
 
     data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
@@ -67,7 +69,7 @@ do
 
     DIR_FLAGS="--save_data False --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
 
-    ABLATION_FLAGS="--last_only True --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
+    ABLATION_FLAGS="--last_only False --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
 
 
     NUM_GPUS=1

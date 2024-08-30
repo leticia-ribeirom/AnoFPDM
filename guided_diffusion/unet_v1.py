@@ -640,7 +640,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, y=None, threshold=-1, null=False, clf_free=False):
+    def forward(self, x, timesteps, y=None, threshold=-1, null=False, clf_free=False, uncond=False):
         """
         Apply the model to an input batch.
 
@@ -667,7 +667,7 @@ class UNetModel(nn.Module):
         For clf-free sampling, set threshold = -1, and clf_free = True
         For non clf-free sampling, e.g., classifier guided, set threshold = -1, and clf_free = False
         """
-        if self.num_classes is not None:
+        if self.num_classes is not None and uncond:
             # assert y.shape == (x.shape[0],)
             cemb = None
 
