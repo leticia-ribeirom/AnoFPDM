@@ -42,6 +42,8 @@ noise_type=gaussian
 model_num=226100 # model steps
 use_ddpm=False # ddpm or ddim sampling 
 
+# 300 0.32 for ddim; 300 0.43 for ddpm
+
 # noise_type=simplex
 # # sample_steps=200 # for simplex noise
 # model_num=350000
@@ -55,9 +57,9 @@ else
 fi
 
 
-for round in 1 2 3
+for round in 1
 do
-    for sample_steps in 100 
+    for sample_steps in 200 
     do
         export OPENAI_LOGDIR="./logs_atlas/translation_${model_name}_${noise_type}_${sample_steps}_${round}"
         echo $OPENAI_LOGDIR

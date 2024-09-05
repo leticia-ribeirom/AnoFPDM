@@ -121,6 +121,7 @@ def get_mask_batch_FPDM(
     # for ablation study
     last_only=False,
     use_gradient_sam=False,
+    use_gradient_para_sam=False,
     interval=-1,
     forward_steps=None,
     diffusion_steps=None,
@@ -152,8 +153,10 @@ def get_mask_batch_FPDM(
 
         Bt = (sqrt_one_minus_alphas_cumprod)**2 / sqrt_alphas_cumprod 
         Bt = Bt[:forward_steps]
+        Bt = torch.tensor(Bt, dtype=torch.float32).to(device)
         mse = (xstarts["xstart"] - xstarts["xstart_null"]) ** 2
-        mse = mse / (Bt**2)[None, :, None, None, None] / (1+w)**2
+        if not use_gradient_para_sam:
+            mse = mse / (Bt**2)[None, :, None, None, None] / (1+w)**2
 
     # for cosine similarity
     mse_flat = torch.mean(
@@ -187,11 +190,9 @@ def get_mask_batch_FPDM(
 
         # get the quantile threshold for predicted mask
         diff_i = diff_flat[sample_num, ...]  # sample_steps x n_modality
-
         diff_max_i = diff_i.max(dim=0)[0]  # n_modality
         diff_max_i = torch.clamp((diff_max_i / diff_max), 0, 1)
         diff_max_i = torch.round(diff_max_i, decimals=2) * 100
-
         index = diff_max_i.to(torch.int64)  # n_modality
         quant = quant_range[index]
 
@@ -199,13 +200,16 @@ def get_mask_batch_FPDM(
         t_s_i = torch.tensor([0, 0], device=device)
         t_e_i = torch.argmax(diff_i, dim=0) if t_e is None else t_e  # n_modality
 
+        # for ablation study
         if t_e_ratio != 1:
             t_e_i = torch.round(t_e_i * t_e_ratio).to(torch.int64)
             end_steps.append(t_e_i)
+        # for ablation study
         if last_only:
             t_s_i = t_e_i - 1
             assert interval == -1  # no interval for last_only
-
+            
+        # for each modality
         thr_i = 0
         mapp = torch.zeros(1, 1, shape, shape).to(device)
         for mod in range(mse.shape[2]):
@@ -213,10 +217,12 @@ def get_mask_batch_FPDM(
                 sample_num, t_s_i[mod] : t_e_i[mod], [mod], ...
             ]  # sample_steps x 1 x 128 x 128
 
+            ############################################################
+            # jumping interval for ablation study and memory efficiency
             if interval != -1:
                 assert interval > 0
                 mse_subset = mse_subset[::interval, ...]
-                # add the last step
+                # make sure add the last step
                 mse_subset = torch.cat(
                     [
                         mse_subset,
@@ -224,7 +230,8 @@ def get_mask_batch_FPDM(
                     ],
                     dim=0,
                 )
-
+            ############################################################
+            
             mask_mod = torch.mean(
                 mse_subset, axis=[0, 1], keepdim=True
             )  # 1 x 1 x 128 x 128
@@ -243,10 +250,10 @@ def get_mask_batch_FPDM(
 
         thr_i = (thr_i / mse.shape[2]) if thr is None else thr
         mask = mapp >= thr_i
-        batch_mask_all[sample_num] = mask.float()
+        batch_mask_all[sample_num] = mask.float() # for the unhealthy setup
 
         if sim <= thr_01:
-            batch_mask[sample_num] = mask.float()
+            batch_mask[sample_num] = mask.float() # for the mixed setup
             pred_lab.append(1)
         else:
             pred_lab.append(0)
@@ -322,7 +329,7 @@ def obtain_optimal_threshold(
                 start=0, end=1
             ).reshape(
                 -1, 1
-            )  # 0 only for healthy
+            )  # 0 for healthy
             y = y.reshape(-1, 1).squeeze().to(device)
         else:
             y = None

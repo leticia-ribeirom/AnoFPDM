@@ -41,13 +41,13 @@ diffusion_steps=1000
 model_num=145000 # model steps
 clf_num=040000 # classifier steps
 
-for round in 1 2 3 # for multiple runs to get error bars
+for round in 1 # for multiple runs to get error bars
 do
     for sample_steps in 200 # you can change this to other values in validation set (grid search)
     do  
         for classifier_scale in 500 # you can change this to other values in validation set (grid search)
         do
-            export OPENAI_LOGDIR="./logs_atlas/translation_clf_guided_${round}_${sample_steps}_${classifier_scale}"
+            export OPENAI_LOGDIR="./logs_atlas/translation_clf_guided_${round}_${sample_steps}_${classifier_scale}_plot"
             echo $OPENAI_LOGDIR
             
             data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
@@ -71,8 +71,8 @@ do
                                 --classifier_resblock_updown True\
                                 --classifier_use_scale_shift_norm True"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 40\
-                        --batch_size_val 100 --num_batches_val 0\
+            DATA_FLAGS="--batch_size 100 --num_batches 2\
+                        --batch_size_val 100 --num_batches_val 10\
                         --modality 0 --use_weighted_sampler False --seed 0"
 
 
@@ -82,7 +82,7 @@ do
                                 --rescale_learned_sigmas False\
                                 --rescale_timesteps False"
 
-            DIR_FLAGS="--save_data False --data_dir $data_dir\
+            DIR_FLAGS="--save_data True --data_dir $data_dir\
                         --image_dir $image_dir --model_dir $model_dir"
 
 

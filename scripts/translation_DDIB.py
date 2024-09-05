@@ -88,8 +88,11 @@ def main():
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
     else:
-        opt_thr = 0.52  # atlas 1000 300 290000 w=1.3
-        logger.log(f"optimal threshold: {opt_thr}")
+        if args.name == "brats":
+            opt_thr = 0.22 # brats 1000 450 210000 w=1.1
+        elif args.name == "atlas":
+            opt_thr = 0.52  # atlas 1000 300 290000 w=1.3
+        logger.log(f"optimal threshold: {opt_thr} for {args.name}")
 
     logging = logging_metrics(logger)
     Y = []

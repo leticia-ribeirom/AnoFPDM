@@ -42,9 +42,9 @@ version=v2
 
 for model_num in 210000
 do
-    for w in 1.1 1.2 1.4 1.6 1.8 2.0 2.2 # you can change this to other values in validation set (grid search)
+    for w in 1.1 # you can change this to other values in validation set (grid search)
     do
-        for sample_steps in 300 400 450 500 # you can change this to other values in validation set (grid search)
+        for sample_steps in 450 # you can change this to other values in validation set (grid search)
         do
             
             export OPENAI_LOGDIR="./brats_tune/translation_ddib_${w}_${sample_steps}_${model_num}"
@@ -80,7 +80,7 @@ do
                         --nnodes=1\
                         --rdzv-backend=c10d\
                         --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
-                    ./scripts/translation_DDIB.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
+                    ./scripts/translation_DDIB.py --name brats $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS
         done
     done
 done

@@ -40,18 +40,25 @@ seed=0 # for data loader only
 noise_type=gaussian
 # sample_steps=300 # for gaussian noise
 model_num=250000 # model steps
-use_ddpm=False # ddpm or ddim sampling 
+use_ddpm=True # ddpm or ddim sampling 
 
 # noise_type=simplex
 # # sample_steps=200 # for simplex noise
 # model_num=350000
 # use_ddpm=True
 
+if [ $use_ddpm = "True" ]
+then
+    model_name="anoddpm"
+else
+    model_name="anoddim"
+fi
+
 for round in 1 2 3
 do
     for sample_steps in 300 
     do
-        export OPENAI_LOGDIR="./logs/translation_anoddpm_${noise_type}_${round}"
+        export OPENAI_LOGDIR="./logs/translation_${model_name}_${noise_type}_${sample_steps}_${round}"
         echo $OPENAI_LOGDIR
 
         data_dir="/data/preprocessed_data"

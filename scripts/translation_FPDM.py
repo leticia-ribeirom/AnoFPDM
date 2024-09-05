@@ -92,9 +92,9 @@ def main():
                 diff_min = torch.tensor([0.0022, 0.0010], device=dist_util.dev())
                 diff_max = torch.tensor([0.0551, 0.0388], device=dist_util.dev())
             elif args.forward_steps == 600:
-                thr_01 = 0.9963247179985046
+                thr_01 = 0.9948798418045044
                 diff_min = torch.tensor([5.5484e-05, 3.4732e-05], device=dist_util.dev())
-                diff_max = torch.tensor([0.0513, 0.0380], device=dist_util.dev())
+                diff_max = torch.tensor([0.0509, 0.0397], device=dist_util.dev())
             
         elif args.name == "atlas":
             # model 290000; w = 1.2; forward_steps = 600; unweighted
@@ -102,9 +102,9 @@ def main():
             # diff_min = torch.tensor([0.0003], device=dist_util.dev())
             # diff_max = torch.tensor([0.0234], device=dist_util.dev())
             # w = 2; 
-            thr_01 = 0.9772974848747253
+            thr_01 = 0.9683040380477905
             diff_min = torch.tensor([0.0009], device=dist_util.dev())
-            diff_max = torch.tensor([0.0602], device=dist_util.dev())
+            diff_max = torch.tensor([0.0572], device=dist_util.dev())
         logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
 
 
@@ -182,6 +182,7 @@ def main():
                 last_only=args.last_only,
                 interval=args.subset_interval,
                 use_gradient_sam=args.use_gradient_sam,
+                use_gradient_para_sam=args.use_gradient_para_sam,
                 forward_steps=args.forward_steps,
                 diffusion_steps=args.diffusion_steps,
                 w=args.w,
@@ -285,6 +286,7 @@ def create_argparser():
         seed=0,  # reproduce
         use_weighted_sampler=False,
         use_gradient_sam=False,
+        use_gradient_para_sam=False,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

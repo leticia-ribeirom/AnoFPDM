@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public
             
-#SBATCH -t 01-15:00:00               
+#SBATCH -t 02-00:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -42,7 +42,7 @@ d_reverse=False # set d_reverse to True for ddim reverse
 for round in 1 2 3
 do
   
-    export OPENAI_LOGDIR="./logs_brats/translation_fpdm_ddpm_${w}_${model_num}_${forward_steps}_${round}_last"
+    export OPENAI_LOGDIR="./logs_brats/translation_fpdm_ddpm_${w}_${model_num}_${forward_steps}_${round}_x1_gradient_last"
     echo $OPENAI_LOGDIR
 
     data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
@@ -63,7 +63,7 @@ do
                         --rescale_learned_sigmas False --rescale_timesteps False"
 
     DIR_FLAGS="--save_data False --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
-    ABLATION_FLAGS="--last_only True --subset_interval -1 --t_e_ratio 1"
+    ABLATION_FLAGS="--last_only True --subset_interval -1 --t_e_ratio 1 --use_gradient_sam True"
 
     NUM_GPUS=1
     torchrun --nproc-per-node $NUM_GPUS \
@@ -71,6 +71,4 @@ do
                 --rdzv-backend=c10d\
                 --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
             ./scripts/translation_FPDM.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
-    # torchrun --nproc-per-node $NUM_GPUS \
-    #         ./scripts/translation_FPDM.py --name brats $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
 done

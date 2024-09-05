@@ -44,11 +44,11 @@ clf_num=149999 # classifier steps
 # 200 1000
 for round in 1 # for multiple runs to get error bars
 do
-    for sample_steps in 150 200 250 300 350 400 450 # you can change this to other values in validation set (grid search)
+    for sample_steps in 200  # you can change this to other values in validation set (grid search)
     do  
-        for classifier_scale in 100 500 800 1000 1500 # you can change this to other values in validation set (grid search)
+        for classifier_scale in 1000 # you can change this to other values in validation set (grid search)
         do
-            export OPENAI_LOGDIR="./brats_tune/translation_clf_guided_${round}_${sample_steps}_${classifier_scale}"
+            export OPENAI_LOGDIR="./logs_brats/translation_clf_guided_${round}_${sample_steps}_${classifier_scale}_plot"
             echo $OPENAI_LOGDIR
             
             data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
@@ -72,7 +72,7 @@ do
                                 --classifier_resblock_updown True\
                                 --classifier_use_scale_shift_norm True"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 1\
+            DATA_FLAGS="--batch_size 100 --num_batches 2\
                         --batch_size_val 100 --num_batches_val 10\
                         --modality 0 3 --seed $seed --use_weighted_sampler False"
 
