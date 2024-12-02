@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=16G
 #SBATCH -p general                
-#SBATCH -q public
+#SBATCH -q grp_twu02
             
 #SBATCH -t 01-15:00:00               
             
@@ -36,7 +36,7 @@ diffusion_steps=1000
 model_num=290000
 version=v2
 
-w=2
+w=30
 d_reverse=False # set d_reverse to True for ddim reverse 
 
 for round in 1 2 3
@@ -71,6 +71,4 @@ do
                 --rdzv-backend=c10d\
                 --rdzv-endpoint=$MASTER_ADDR:$MASTER_PORT\
             ./scripts/translation_FPDM.py $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
-    # torchrun --nproc-per-node $NUM_GPUS \
-    #         ./scripts/translation_FPDM.py --name brats $MODEL_FLAGS $DIFFUSION_FLAGS $DIR_FLAGS $DATA_FLAGS $ABLATION_FLAGS
 done

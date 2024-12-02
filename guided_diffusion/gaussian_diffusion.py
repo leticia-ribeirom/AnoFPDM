@@ -577,14 +577,18 @@ class GaussianDiffusion:
         if noise is not None:
             img = noise
         else:
+            # sample from pure noise
             img = th.randn(*shape, device=device) 
             if noise_fn is not None:
+                # for other noise functions such as simplex noise   
                 t = th.tensor([self.num_timesteps - 1] * shape[0], device=device)
                 img = noise_fn(img, t)
         
         if sample_steps is None:
+            # for full sampling
             indices = list(range(self.num_timesteps))[::-1]
-        else:
+        else: 
+            # for partial sampling
             indices = list(range(sample_steps))[::-1] 
         
         if progress:
@@ -969,9 +973,7 @@ class GaussianDiffusion:
                     terms["vb"] *= self.num_timesteps / 1000.0
 
             target = {
-                ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
-                    x_start=x_start, x_t=x_t, t=t
-                )[0],
+                ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(x_start=x_start, x_t=x_t, t=t)[0],
                 ModelMeanType.START_X: x_start,
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
@@ -1042,16 +1044,7 @@ class GaussianDiffusion:
                         )
 
                         x_t = out_re["sample"]
-                        
-                    # x_t = x_start if x_t is None else x_t
-                    # out_re = self.ddim_reverse_sample(
-                    #     model,
-                    #     x=x_t,
-                    #     t=t_batch,
-                    #     clip_denoised=clip_denoised,
-                    #     model_kwargs=model_kwargs_reverse,
-                    # )
-                    # x_t = out_re["sample"]
+                         
 
                 out = self.ddim_sample(
                     model,

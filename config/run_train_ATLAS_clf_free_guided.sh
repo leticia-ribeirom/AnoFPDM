@@ -53,7 +53,7 @@ DIFFUSION_FLAGS="--diffusion_steps 1000\
                     --rescale_timesteps False\
                     --noise_type gaussian"
 
-TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size --ddpm_sampling $ddpm_sampling --total_epochs 200"
+TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size --ddpm_sampling $ddpm_sampling --total_epochs 1000"
 
 EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size"
 

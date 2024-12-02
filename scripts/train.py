@@ -145,7 +145,7 @@ def create_argparser():
         noise_type="gaussian",
         ddpm_sampling=False,
         unet_ver="v2",
-        total_epochs=100,
+        total_epochs=1000,
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

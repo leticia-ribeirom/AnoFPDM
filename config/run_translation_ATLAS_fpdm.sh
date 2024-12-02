@@ -6,10 +6,10 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64G
-#SBATCH -p general                
-#SBATCH -q public
+#SBATCH -p general             
+#SBATCH -q grp_twu02
             
-#SBATCH -t 0-15:00:00               
+#SBATCH -t 1-15:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -40,10 +40,10 @@ version=v2
 d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding) 
                 # or will be ddpm reverse (stochastic encoding)
 
-round=1
-for w in 2
+w=30
+for round in 1 2 3
 do
-    export OPENAI_LOGDIR="./logs_atlas/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1_plot"
+    export OPENAI_LOGDIR="./logs_atlas_aba/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1_last"
     echo $OPENAI_LOGDIR
 
     data_dir="/data/amciilab/yiming/DATA/ATLAS/preprocessed_data_t1_00_128"
@@ -56,7 +56,7 @@ do
                     --num_channels $num_channels --model_num $model_num --ema True\
                     --forward_steps $forward_steps --d_reverse $d_reverse" 
 
-    DATA_FLAGS="--batch_size 100 --num_batches 3 \
+    DATA_FLAGS="--batch_size 100 --num_batches 40 \
                 --batch_size_val 100 --num_batches_val 10\
                 --modality 0 --use_weighted_sampler False --seed $seed"
 
@@ -66,9 +66,9 @@ do
                         --noise_schedule linear \
                         --rescale_learned_sigmas False --rescale_timesteps False"
 
-    DIR_FLAGS="--save_data True --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
+    DIR_FLAGS="--save_data False --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
 
-    ABLATION_FLAGS="--last_only False --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
+    ABLATION_FLAGS="--last_only True --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False"
 
 
     NUM_GPUS=1

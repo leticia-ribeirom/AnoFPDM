@@ -1,15 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name='translation_test'
+#SBATCH --job-name='trans_ano'
 #SBATCH --nodes=1                       
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=16G
 #SBATCH -p general                
-#SBATCH -q public
+#SBATCH -q public 
             
-#SBATCH -t 00-05:00:00               
+#SBATCH -t 00-1:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -37,15 +37,15 @@ w=-1 # unguided
 diffusion_steps=1000
 seed=0 # for data loader only
 
-noise_type=gaussian
-# sample_steps=300 # for gaussian noise
-model_num=250000 # model steps
-use_ddpm=True # ddpm or ddim sampling 
+# noise_type=gaussian
+# # sample_steps=300 # for gaussian noise
+# model_num=250000 # model steps
+# use_ddpm=True # ddpm or ddim samplingv 
 
-# noise_type=simplex
-# # sample_steps=200 # for simplex noise
-# model_num=350000
-# use_ddpm=True
+noise_type=simplex
+# sample_steps=200 # for simplex noise
+model_num=350000
+use_ddpm=True
 
 if [ $use_ddpm = "True" ]
 then
@@ -54,16 +54,16 @@ else
     model_name="anoddim"
 fi
 
-for round in 1 2 3
+for round in 1
 do
-    for sample_steps in 300 
+    for sample_steps in 200 
     do
-        export OPENAI_LOGDIR="./logs/translation_${model_name}_${noise_type}_${sample_steps}_${round}"
+        export OPENAI_LOGDIR="./logs_brats/translation_${model_name}_${noise_type}_${sample_steps}_${round}_plot"
         echo $OPENAI_LOGDIR
 
-        data_dir="/data/preprocessed_data"
+        data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
        
-        model_dir="./logs/anoddpm_${noise_type}"
+        model_dir="./logs/logs_brats_normal_99_11_128/logs_unguided_all_00_v1_128_anoddpm_${noise_type}"
         
         image_dir="$OPENAI_LOGDIR"
 
@@ -73,8 +73,8 @@ do
                         --num_channels $num_channels --model_num $model_num --ema True\
                         --use_ddpm $use_ddpm --noise_type $noise_type"
 
-        DATA_FLAGS="--batch_size 100 --num_batches 100\
-                    --batch_size_val 100 --num_batches_val 10\
+        DATA_FLAGS="--batch_size 100 --num_batches 2\
+                    --batch_size_val 100 --num_batches_val 0\
                     --modality 0 3 --seed $seed --use_weighted_sampler False"
 
 
@@ -85,7 +85,7 @@ do
                             --rescale_timesteps False\
                             --dynamic_clip False"
 
-        DIR_FLAGS="--save_data False --data_dir $data_dir\
+        DIR_FLAGS="--save_data True --data_dir $data_dir\
                     --image_dir $image_dir --model_dir $model_dir"
 
 

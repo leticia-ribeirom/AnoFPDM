@@ -97,14 +97,16 @@ def main():
                 diff_max = torch.tensor([0.0509, 0.0397], device=dist_util.dev())
             
         elif args.name == "atlas":
-            # model 290000; w = 1.2; forward_steps = 600; unweighted
-            # thr_01 = 0.9918085336685181
-            # diff_min = torch.tensor([0.0003], device=dist_util.dev())
-            # diff_max = torch.tensor([0.0234], device=dist_util.dev())
-            # w = 2; 
-            thr_01 = 0.9683040380477905
-            diff_min = torch.tensor([0.0009], device=dist_util.dev())
-            diff_max = torch.tensor([0.0572], device=dist_util.dev())
+            # model 290000; w = 30; forward_steps = 600; unweighted
+            # thr_01 = 0.6869481205940247
+            # diff_min = torch.tensor([0.0708], device=dist_util.dev())
+            # diff_max = torch.tensor([1.0770], device=dist_util.dev())
+            # model 290000; w = 20; forward_steps = 600; unweighted
+            thr_01 = 0.7285396456718445
+            diff_min = torch.tensor([0.0392], device=dist_util.dev())
+            diff_max = torch.tensor([0.8555], device=dist_util.dev())
+            
+            
         logger.log(f"diff_min: {diff_min}, diff_max: {diff_max}, thr_01: {thr_01}")
 
 

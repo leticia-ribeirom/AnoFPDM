@@ -109,9 +109,8 @@ def main():
         )
         logger.log(f"optimal threshold: {opt_thr}, dice_max_val: {dice_max_val}")
     else:
-        opt_thr = 0.48 # atlas ddim 200
-        # opt_thr = 0.35 # atlas ddpm 100
-
+        # opt_thr = 0.27 # atlas ddpm 200 simplex
+        opt_thr = 0.08 # brats ddpm 200 simplex
     logging = logging_metrics(logger) 
     Y = []
     PRED_Y = []
@@ -219,7 +218,7 @@ def main():
             np.save(all_masks_path, all_masks)
 
             all_pred_maps = np.concatenate(all_pred_maps, axis=0)
-            all_pred_maps_path = os.path.join(image_subfolder, f"pred_maps_{k}.npy")
+            all_pred_maps_path = os.path.join(image_subfolder, f"pred_map_{k}.npy")
             np.save(all_pred_maps_path, all_pred_maps)
 
     dist.barrier()
@@ -244,6 +243,7 @@ def create_argparser():
         batch_size_val=100,
         use_weighted_sampler=False,
         noise_type="gaussian",
+        opt_thr=-1
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()

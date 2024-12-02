@@ -103,8 +103,6 @@ def ROC_AUC(source, real_mask, ano_map):
 
 def AUPRC_score(source, real_mask, ano_map):
     # note that source is rescaled to [-1, 1]
-    # you can find the region with mean intensity > -0.95 for prauc
-    # you can also comment the following line to calculate prauc for the whole image
     foreground = source.mean(dim=1, keepdim=True).reshape(-1) > -0.95
     real_mask = real_mask.reshape(-1)[foreground]
     ano_map = ano_map.reshape(-1)[foreground]

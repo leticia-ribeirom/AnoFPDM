@@ -1,15 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name='translation_test'
+#SBATCH --job-name='trans_fpdm'
 #SBATCH --nodes=1                       
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=64G
-#SBATCH -p general                
-#SBATCH -q public
+#SBATCH -p htc              
+#SBATCH -q public 
             
-#SBATCH -t 01-12:00:00               
+#SBATCH -t 00-04:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -41,12 +41,12 @@ version=v2
 d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding) 
                 # or will be ddpm reverse (stochastic encoding)
 
-
-for round in 1 2 3
+# w=2
+for round in 1 
 do
-    for w in 2 # selected w=2 for brats; change here for abalation study
+    for w in 45 50  # selected w=2 for brats; change here for abalation study
     do
-        export OPENAI_LOGDIR="./logs_brats_aba/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1_gradient_para"
+        export OPENAI_LOGDIR="./logs_brats_aba/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1"
         echo $OPENAI_LOGDIR
 
         data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
@@ -59,8 +59,8 @@ do
                         --forward_steps $forward_steps --d_reverse $d_reverse" 
 
 
-        DATA_FLAGS="--batch_size 100 --num_batches 50 \
-                    --batch_size_val 100 --num_batches_val 10\
+        DATA_FLAGS="--batch_size 50 --num_batches 1 \
+                    --batch_size_val 50 --num_batches_val 10\
                     --modality 0 3 --use_weighted_sampler False --seed $seed"
 
         DIFFUSION_FLAGS="--null True \
@@ -71,7 +71,7 @@ do
 
         DIR_FLAGS="--save_data False --data_dir $data_dir  --image_dir $image_dir --model_dir $model_dir"
 
-        ABLATION_FLAGS="--last_only False --subset_interval -1 --t_e_ratio 1 --use_gradient_sam True --use_gradient_para_sam True"
+        ABLATION_FLAGS="--last_only False --subset_interval -1 --t_e_ratio 1 --use_gradient_sam False --use_gradient_para_sam False"
 
 
         NUM_GPUS=1

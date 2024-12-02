@@ -139,7 +139,7 @@ def get_mask_batch_FPDM(
         mse = (
             xstarts["xstart"] - source[:, modality, ...].unsqueeze(1)
         ) ** 2  # batch_size x sample_steps x n_modality x 128 x 128
-    else:
+    else: # for ablation study
         assert forward_steps is not None
         assert diffusion_steps is not None
         assert w is not None
@@ -263,20 +263,20 @@ def get_mask_batch_FPDM(
 
 # %% For non-dynamical threshold to obtain pred_mask (other comparison methods)
 def get_mask_batch(source, target, threshold, mod, median_filter=True):
-    abe_sum = (
-        (source[:, mod, ...] - target[:, mod, ...]).abs().mean(dim=1, keepdims=True)
+    mse = (
+        ((source[:, mod, ...] - target[:, mod, ...])**2).mean(dim=1, keepdims=True)
     )  # nx1x128x128
 
-    abe_sum = (
-        median_pool(abe_sum, kernel_size=5, stride=1, padding=2)
+    mse = (
+        median_pool(mse, kernel_size=5, stride=1, padding=2)
         if median_filter
-        else abe_sum
+        else mse
     )
 
-    abe_mask = abe_sum >= threshold
-    abe_mask = abe_mask.float()
-    pred_lab = (torch.sum(abe_mask, dim=(1, 2, 3)) > 0).float().cpu()
-    return abe_mask, abe_sum, pred_lab
+    mse_mask = mse >= threshold
+    mse_mask = mse_mask.float()
+    pred_lab = (torch.sum(mse_mask, dim=(1, 2, 3)) > 0).float().cpu()
+    return mse_mask, mse, pred_lab
 
 
 def obtain_optimal_threshold(

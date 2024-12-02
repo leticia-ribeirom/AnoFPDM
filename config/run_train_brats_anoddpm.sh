@@ -9,7 +9,7 @@
 #SBATCH -p general                
 #SBATCH -q public
             
-#SBATCH -t 01-12:00:00               
+#SBATCH -t 01-20:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -20,19 +20,19 @@ module load mamba/latest
 source activate torch_base
 
 
-# noise_type=simplex
-noise_type=gaussian
+noise_type=simplex
+# noise_type=gaussian
 
 in_channels=4
-batch_size=32
-save_interval=10000
+batch_size=64
+save_interval=5000
 num_classes=0 # unguided
 image_size=128
 
 # log directory
-export OPENAI_LOGDIR="./logs/anoddpm_${noise_type}"
+export OPENAI_LOGDIR="./logs/logs_brats_normal_99_11_128/logs_anoddpm_${noise_type}"
 # data directory
-data_dir="/data/preprocessed_data"
+data_dir="/data/amciilab/yiming/DATA/BraTS21_training/preprocessed_data_all_00_128"
 image_dir="$OPENAI_LOGDIR/images"
 
 DATA_FLAGS="--image_size $image_size --num_classes $num_classes \
@@ -52,11 +52,11 @@ DIFFUSION_FLAGS="--diffusion_steps 1000\
                     --rescale_learned_sigmas False \
                     --rescale_timesteps False"
 
-TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size"
+TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size --total_epochs 1000"
 
 
-EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size \
-            --timestep_respacing ddim1000" # ignore this for non-gaussian noise and we use ddpm sampling for visual checking
+EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size --ddpm_sampling True"
+            
 
 
 # slurm setup

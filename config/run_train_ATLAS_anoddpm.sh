@@ -7,9 +7,9 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --mem=16G
 #SBATCH -p general                
-#SBATCH -q public
+#SBATCH -q grp_twu02 
             
-#SBATCH -t 01-12:00:00               
+#SBATCH -t 00-12:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -20,12 +20,12 @@ module load mamba/latest
 source activate torch_base
 
 
-# noise_type=simplex
-noise_type=gaussian
+noise_type=simplex
+# noise_type=gaussian
 
 in_channels=1
 batch_size=64
-save_interval=10000
+save_interval=5000
 
 num_classes=0 # unguided
 image_size=128
@@ -56,10 +56,10 @@ DIFFUSION_FLAGS="--diffusion_steps 1000\
                     --rescale_timesteps False"
 
 TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir \
-            --batch_size $batch_size --total_epochs 300"
+            --batch_size $batch_size --total_epochs 1000"
 
 
-EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size"
+EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size --ddpm_sampling True"
 
 
 # slurm setup

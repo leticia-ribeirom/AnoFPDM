@@ -6,10 +6,10 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=16G
-#SBATCH -p general                
+#SBATCH -p htc               
 #SBATCH -q public
             
-#SBATCH -t 01-00:00:00               
+#SBATCH -t 00-04:00:00               
             
 #SBATCH -e ./slurm_out/slurm.%j.err
 #SBATCH -o ./slurm_out/slurm.%j.out
@@ -71,7 +71,7 @@ do
                                 --classifier_resblock_updown True\
                                 --classifier_use_scale_shift_norm True"
 
-            DATA_FLAGS="--batch_size 100 --num_batches 2\
+            DATA_FLAGS="--batch_size 100 --num_batches 5\
                         --batch_size_val 100 --num_batches_val 10\
                         --modality 0 --use_weighted_sampler False --seed 0"
 

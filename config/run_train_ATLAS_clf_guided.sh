@@ -51,8 +51,7 @@ DIFFUSION_FLAGS="--clf_free False\
 
 TRAIN_FLAGS="--data_dir $data_dir --image_dir $image_dir --batch_size $batch_size"
 
-EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size \
-                --timestep_respacing ddim1000"
+EVA_FLAGS="--save_interval $save_interval --sample_shape 12 $in_channels $image_size $image_size" 
 
 
 # slurm setup
