@@ -113,7 +113,7 @@ def process_patient(name, path, target_path, mod, first=-1, last=-1, downsample=
         np.savez_compressed(patient_dir / f"slice_{slice_idx}", x=low_res_x, y=low_res_y)
 
 
-def preprocess(name: str, datapath: Path, mod: str, first=-1, last=-1, shape=128, downsample=False):
+def preprocess(name: str, datapath: Path, mod: str, first=-1, last=-1, shape=128, downsample=True):
 
     all_imgs = sorted(list((datapath).iterdir()))
 
@@ -168,19 +168,17 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
-    # parser.add_argument("--name", default='brats', type=str, help="dataset name")
-    # parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
-    
-    
-    
+    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
+    parser.add_argument("--name", default='brats', type=str, help="dataset name")
+    parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
+     
     # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/MSLUB/data', type=str, help="path to data directory")
     # parser.add_argument("--name", default='MSLUB', type=str, help="dataset name")
     # parser.add_argument("--mod", default='all', type=str, help="modelity to preprocess")
     
-    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/ATLAS/raw2', type=str, help="path to data directory")
-    parser.add_argument("--name", default='atlas', type=str, help="dataset name")
-    parser.add_argument("--mod", default='t1', type=str, help="modelity to preprocess")
+    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/ATLAS/raw2', type=str, help="path to data directory")
+    # parser.add_argument("--name", default='atlas', type=str, help="dataset name")
+    # parser.add_argument("--mod", default='t1', type=str, help="modelity to preprocess")
      
      
     parser.add_argument("--first", default=0, 

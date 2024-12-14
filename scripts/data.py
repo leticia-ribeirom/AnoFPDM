@@ -111,12 +111,15 @@ class BrainDataset(Dataset):
             if_unhealthy = torch.from_numpy(y[0]).float().sum() > 0
             lab = 1 if if_unhealthy else 0
             
-            # rescacle to [-1, 1]
-            x_min = x_tensor.view(x_tensor.shape[0], -1).min(1).values
-            x_max = x_tensor.view(x_tensor.shape[0], -1).max(1).values
-            x_tensor = (x_tensor - x_min[:, None, None]) / (
-                x_max[:, None, None] - x_min[:, None, None] + 0.00001
-            )  # [0, 1]
+            # rescale to [-1, 1]
+            # x_min = x_tensor.view(x_tensor.shape[0], -1).min(1).values
+            # x_max = x_tensor.view(x_tensor.shape[0], -1).max(1).values
+            # x_tensor = (x_tensor - x_min[:, None, None]) / (
+            #     x_max[:, None, None] - x_min[:, None, None] + 0.00001
+            # )  # [0, 1]
+            
+            # or clip to [0, 1]
+            # x_tensor = torch.clamp(x_tensor, 0, 1)
             x_tensor = x_tensor * 2 - 1  # [-1, 1]
             return x_tensor, y_tensor, lab
 
