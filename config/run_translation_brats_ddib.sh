@@ -69,7 +69,7 @@ do
                                 --noise_schedule linear\
                                 --rescale_learned_sigmas False\
                                 --rescale_timesteps False\
-                                --dynamic_clip False"
+                                --dynamic_clip False" # seems not working 
 
             DIR_FLAGS="--save_data False --data_dir $data_dir\
                         --image_dir $image_dir --model_dir $model_dir"

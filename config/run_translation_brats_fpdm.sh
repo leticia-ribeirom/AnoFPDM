@@ -44,7 +44,7 @@ d_reverse=True # set d_reverse to True for ddim reverse (deterministic encoding)
 # w=2
 for round in 1 
 do
-    for w in 45 50  # selected w=2 for brats; change here for abalation study
+    for w in 2  # selected w=2 for brats; change here for abalation study
     do
         export OPENAI_LOGDIR="./logs_brats_aba/translation_fpdm_${w}_${model_num}_${forward_steps}_${round}_x1"
         echo $OPENAI_LOGDIR
