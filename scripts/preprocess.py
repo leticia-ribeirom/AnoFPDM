@@ -1,270 +1,193 @@
-import os
-import pydicom
-import numpy as np
+# Description: Preprocess the BraTS2021 dataset into numpy arrays
+# adpated from https://github.com/AntanasKascenas/DenoisingAE/tree/master
+
 import torch
-import torch.nn.functional as F
 import random
 from pathlib import Path
+import numpy as np
+import nibabel as nib
 from tqdm import tqdm
-
-# --- Configurações ---
-# Garanta que o caminho para o seu dataset está correto
-dataset_dir = "/mnt/HD_1/dados/dadosFazekas/tmp_20"
-label_mapping = {"0.5": 0.0, "1.5": 1.0, "2.5": 2.0}
-TARGET_SHAPE_2D = (256, 256) # Tamanho alvo 2D para as fatias
-MODALITY = "dicom_fazekas_unimodal"
-
-
-def preprocess_dicom_minimal(dicom_path):
-    """
-    Carrega o DICOM e retorna o tensor de imagem e os dados.
-    A imagem é escalada provisoriamente para 0-1 antes da normalização final por percentil.
-    """
-    try:
-        dicom_data = pydicom.dcmread(dicom_path, force=True)
-        image = dicom_data.pixel_array.astype(np.float32)
-        # Escala inicial 0-1 (melhora interpolação)
-        image = (image - image.min()) / (image.max() - image.min() + 1e-6)
-        image = torch.tensor(image).unsqueeze(0)  # C=1: (1, H, W)
-        return image, dicom_data
-    except Exception as e:
-        # print(f"Erro ao processar DICOM {dicom_path}: {e}")
-        return None, None
-
-def extract_label(dicom_data):
-    """Extrai a label Fazekas customizada."""
-    tag_value = dicom_data.get((0x0011, 0x1001),)
-    if hasattr(tag_value, 'value'):
-        return str(tag_value.value)
-    return str(tag_value)
+import nrrd
+import torch.nn.functional as F
 
 
 def normalise_percentile(volume):
     """
-    Normaliza o volume 5D (1, C, H, W, D) pela escala do 99º percentil do foreground (nonzero).
-    Adaptado do Segundo Código para a forma 5D (1, 1, H, W, D).
+    Normalise the intensity values in each modality by scaling by 99 percentile foreground (nonzero) value.
     """
-    # volume.shape[1] é o número de modalidades/canais (que é 1 neste caso)
-    for mdl in range(volume.shape[1]): # Loop para o canal de modalidade
-        # Extrai o volume 3D (H, W, D) para a modalidade 'mdl'
-        v_3d = volume[0, mdl, :, :, :]
-        # Acha o array 1D de todos os pixels > 0 (foreground)
-        v_ = v_3d.reshape(-1)
-        v_ = v_[v_ > 0]  # Usa apenas o foreground (não-zero)
-        
-        if v_.numel() == 0:
-            continue
-            
+    for mdl in range(volume.shape[1]):
+        v_ = volume[:, mdl, :, :].reshape(-1)
+        v_ = v_[v_ > 0]  # Use only the brain foreground to calculate the quantile
         p_99 = torch.quantile(v_, 0.99)
-        
-        # Adaptando para a forma 5D:
-        if p_99 > 1e-6:
-            volume[0, mdl, :, :, :] /= p_99
-        else:
-            volume[0, mdl, :, :, :] = torch.zeros_like(volume[0, mdl, :, :, :])
-            
+        volume[:, mdl, :, :] /= p_99
     return volume
 
-def process_patient_series_slices(serie_path, target_path, final_label):
-    """
-    Processa uma série DICOM, aplica normalização, filtra fatias com cérebro e salva as fatias 2D (X e Y).
-    """
-    dicom_files = sorted([f for f in os.listdir(serie_path) if f.endswith(".dcm")])
-    if not dicom_files:
-        return None
-        
-    series_images = []
+def center_crop(volume, target_shape):
+    h, w, _ = volume.shape
+    th, tw = target_shape, target_shape
+    x1 = int(round((w - tw) / 2.))
+    y1 = int(round((h - th) / 2.))
+    cropped_volume = volume[y1:y1+th, x1:x1+tw, :]
+    return cropped_volume
     
-    # 1. Pré-processa e redimensiona cada fatia
-    for dicom_file in dicom_files:
-        dicom_path = os.path.join(serie_path, dicom_file)
-        image_tensor, dicom_data = preprocess_dicom_minimal(dicom_path) # image_tensor: (1, H, W)
-        
-        if image_tensor is None:
-            continue
 
-        # Redimensiona para TARGET_SHAPE_2D (256x256)
-        # Usa .unsqueeze(0) para (1, 1, H, W), então redimensiona (modo bilinear), e remove o batch dim (.squeeze(0))
-        image_resized = F.interpolate(image_tensor.unsqueeze(0), size=TARGET_SHAPE_2D, mode='bilinear', align_corners=False).squeeze(0)
-        series_images.append(image_resized)
+def process_patient(name, path, target_path, mod, first=-1, last=-1, downsample=False):
+    
+    if name == 'brats':
+        flair = nib.load(path / f"{path.name}_flair.nii.gz").get_fdata()
+        t1 = nib.load(path / f"{path.name}_t1.nii.gz").get_fdata()
+        t1ce = nib.load(path / f"{path.name}_t1ce.nii.gz").get_fdata()
+        t2 = nib.load(path / f"{path.name}_t2.nii.gz").get_fdata()
+        labels = nib.load(path / f"{path.name}_seg.nii.gz").get_fdata()
+    elif name == "atlas":
+        t1 = nib.load(path / f"{path.name}_T1w.nii.gz").get_fdata()
+        labels = nib.load(path / f"{path.name}_mask.nii.gz").get_fdata()
+    elif name == 'mmbrain':
+        seed = random.randint(1, 5)
+        flair = center_crop(nrrd.read(path / f"TrialSeed{seed}_FLAIR.nrrd")[0], 240).astype(np.float64)
+        t1 = center_crop(nrrd.read(path / f"TrialSeed{seed}_T1.nrrd")[0], 240).astype(np.float64)
+        t1ce = center_crop(nrrd.read(path / f"TrialSeed{seed}_T1Gad.nrrd")[0], 240).astype(np.float64)
+        t2 = center_crop(nrrd.read(path / f"TrialSeed{seed}_T2.nrrd")[0], 240).astype(np.float64)
+        labels = center_crop(nrrd.read(path / f"TrialSeed{seed}_discrete_truth.nrrd")[0], 240).astype(np.float64)
+    elif name == "mslub":
+        flair = np.moveaxis(nib.load(path / f"{path.name}_FLAIR.nii.gz").get_fdata(), 0, -1)
+        labels = np.moveaxis(nib.load(path / f"{path.name}_consensus_gt.nii.gz").get_fdata(), 0, -1)
+    else:
+        raise ValueError(f"Dataset {name} not supported.")
+
+    assert mod in ["all", "flair", "t1", "t1ce", "t2"]
+
+    # volume shape: [1, 1, h, w, slices]
+    if mod == "all":
+        volume = torch.stack([torch.from_numpy(x) for x in [flair, t1, t1ce, t2]], dim=0).unsqueeze(dim=0)
+    elif mod == "flair":
+        volume = torch.stack([torch.from_numpy(x) for x in [flair]], dim=0).unsqueeze(dim=0)
+    elif mod == "t1":
+        volume = torch.stack([torch.from_numpy(x) for x in [t1]], dim=0).unsqueeze(dim=0)
+    elif mod == "t1ce":
+        volume = torch.stack([torch.from_numpy(x) for x in [t1ce]], dim=0).unsqueeze(dim=0)
+    elif mod == "t2":
+        volume = torch.stack([torch.from_numpy(x) for x in [t2]], dim=0).unsqueeze(dim=0)
+
+    # exclude first n and last m slices
+    # 1 4 240 240 155; 240 240 155
+    
+    if first > 0 and last > 0:
+        volume = volume[:, :, :, :, first:-last]
+        labels = labels[:, :, first:-last]
+    elif first > 0 and last < 0:
+        volume = volume[:, :, :, :, first:]
+        labels = labels[:, :, first:]
+    elif first < 0 and last > 0:
+        volume = volume[:, :, :, :, :-last]
+        labels = labels[:, :, :-last]
         
-    if not series_images:
-        return None
+    # 1 1 240 240 155
+    if name == 'brats' or name == 'mslub' or name == 'atlas':
+        labels = torch.from_numpy(labels > 0.5).float().unsqueeze(dim=0).unsqueeze(dim=0)
+    elif name == 'mmbrain':
+        labels = torch.where(torch.from_numpy(labels)==5, 1, 0).float().unsqueeze(dim=0).unsqueeze(dim=0)
 
-    # 2. Empilha e ajusta a dimensão para (1, 1, H, W, D)
-    # series_images[i] é (1, H, W). Stack no dim=1 resulta em (1, num_slices, H, W)
-    volume_stacked = torch.stack(series_images, dim=1)
-    # Permute para a ordem (1, C, H, W, D) = (1, 1, H, W, num_slices)
-    volume = volume_stacked.unsqueeze(0).permute(0, 1, 3, 4, 2)
-    
-    # 3. Normalização do Volume (99º Percentil)
-    volume = normalise_percentile(volume)
-    
-    # 4. Filtragem de Fatias Vazias (Lógica do Segundo Código)
-    # volume.shape: (1, 1, H, W, D)
-    
-    # Média dos canais (ainda 1 canal) -> (H, W, D). volume[0] é (1, H, W, D)
-    mean_volume_slice = volume[0].mean(dim=0) # (H, W, D)
-    
-    # Soma (H, W) para cada fatia D; Usa 0.5 para considerar valores após normalização
-    # Sum(axis=0).sum(axis=0) soma H e W, resultando em (D)
-    sum_dim_slices = (mean_volume_slice.sum(axis=0).sum(axis=0) > 0.5).int()
-    
-    num_slices = volume.shape[-1]
-    
-    # Encontra o primeiro slice (fs_dim): primeiro índice > 0
-    fs_dim = sum_dim_slices.argmax()
-    # Encontra o último slice (ls_dim): num_slices - (primeiro índice > 0 da array invertida)
-    # Se todos forem > 0, o argmax da flip é 0, e ls_dim = num_slices - 0 = num_slices. Correto.
-    ls_dim = num_slices - sum_dim_slices.flip(dims=[0]).argmax()
-    
-    print(f"Série {Path(serie_path).name} tem {num_slices} fatias. Processando de {fs_dim} até {ls_dim}.")
-    
-    if fs_dim == ls_dim:
-         print("Aviso: Nenhuma fatia com conteúdo cerebral encontrada após o filtro.", flush=True)
-         return None
-
-    # 5. Salvamento das Fatias (Incluindo Máscara Y de Zeros)
-    patient_dir = target_path / f"serie_{Path(serie_path).name}"
+    patient_dir = target_path / f"patient_{path.name}"
     patient_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Salva a label final do volume (Fazekas)
-    with open(patient_dir / "label.txt", "w") as f:
-        f.write(str(final_label))
-        
-    # Gera a máscara de lesão (Y) - Zero Mask, pois Fazekas é label de volume
-    zero_mask = torch.zeros((1, 1) + TARGET_SHAPE_2D, dtype=torch.float32)
 
-    # Itera apenas sobre as fatias com conteúdo cerebral
-    for slice_idx in range(fs_dim, ls_dim):
-        # volume[:, :, :, :, slice_idx] -> (1, 1, H, W)
-        slice_data_x = volume[:, :, :, :, slice_idx] 
-        
-        # Salva a imagem X e a máscara Y (zero mask)
-        # O AnoFPDM precisa dessa estrutura X e Y para carregar o dataset, mesmo que Y seja zero.
-        np.savez_compressed(
-            patient_dir / f"slice_{slice_idx}", 
-            x=slice_data_x.numpy(), # (1, 1, H, W)
-            y=zero_mask.numpy()     # (1, 1, H, W)
-        )
+    volume = normalise_percentile(volume)
 
-    return True # Retorna True se processado
+    sum_dim2 = (volume[0].mean(dim=0).sum(axis=0).sum(axis=0) > 0.5).int()
+    fs_dim2 = sum_dim2.argmax()
+    ls_dim2 = volume[0].mean(dim=0).shape[2] - sum_dim2.flip(dims=[0]).argmax()
 
-def determine_label(serie_path):
-    """Apenas determina a label da série."""
-    dicom_files = sorted([f for f in os.listdir(serie_path) if f.endswith(".dcm")])
-    if not dicom_files:
-        return -1
+    print(f"Patient {path.name} has {fs_dim2} to {ls_dim2} slices with brain tissue.", flush=True)
     
-    # Usa a primeira fatia para extrair a label
-    dicom_path = os.path.join(serie_path, dicom_files[0])
-    dicom_data = pydicom.dcmread(dicom_path, force=True)
-    
-    label_value_str = extract_label(dicom_data)
-    final_label = label_mapping.get(label_value_str, label_value_str)
-    
-    try:
-        # Padroniza F2 e F3 como 2 (Anomalia Severa)
-        if float(final_label) >= 2.0:
-            final_label = 2
-        # F1 como 1 (Anomalia Leve)
-        elif float(final_label) == 1.0:
-            final_label = 1
-        # F0 como 0 (Normal - DOMÍNIO DE TREINO)
+    for slice_idx in range(fs_dim2, ls_dim2):
+        if downsample:
+            if name == 'brats' or name == 'atlas':
+                low_res_x = F.interpolate(volume[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
+                low_res_y = F.interpolate(labels[:, :, :, :, slice_idx], mode="bilinear", size=(128, 128))
+            elif name == 'mslub':
+                low_res_x = F.interpolate(volume[:, :, :, :, slice_idx], mode="bilinear", size=(256, 256))
+                low_res_y = F.interpolate(labels[:, :, :, :, slice_idx], mode="bilinear", size=(256, 256))
         else:
-            final_label = 0
-            
-        return int(final_label)
-    except:
-        return -1 # Label inválida
+            low_res_x = volume[:, :, :, :, slice_idx]
+            low_res_y = labels[:, :, :, :, slice_idx]
+        np.savez_compressed(patient_dir / f"slice_{slice_idx}", x=low_res_x, y=low_res_y)
 
-def preprocess(datapath: Path, shape=256):
 
-    # 1. Encontrar todos os caminhos de séries
-    all_series_paths = []
-    for root, dirs, files in os.walk(datapath):
-        if any(f.endswith(".dcm") for f in files):
-            all_series_paths.append(Path(root))
-    all_series_paths = sorted(all_series_paths)
-    
-    base_preprocess_dir = Path("./preprocess")  # Pasta fixa para salvar os dados pré-processados
-    splits_path = base_preprocess_dir / "data_splits"
+def preprocess(name: str, datapath: Path, mod: str, first=-1, last=-1, shape=128, downsample=True):
 
-    
-    # --- Lógica de Split (Treino APENAS com Normais - AnoFPDM) ---
+    all_imgs = sorted(list((datapath).iterdir()))
+
+    sub_dir = f"preprocessed_data_{mod}_{first}{last}_{shape}"
+    splits_path = datapath.parent / sub_dir / "data_splits"
+
     if not splits_path.exists():
-        
-        # 2. Apurar labels para separar Normal/Anômalo
-        series_labels = {}
-        for serie_path in tqdm(all_series_paths, desc="Apurando labels para Split"):
-            series_labels[serie_path] = determine_label(serie_path)
-            
-        # Filtra séries com labels válidas (0, 1, 2)
-        valid_paths = [p for p, l in series_labels.items() if l in (0, 1, 2)]
-        normal_paths = [p for p, l in series_labels.items() if l == 0]
-        anomalous_paths = [p for p, l in series_labels.items() if l in (1, 2)]
-        
-        # Embaralhamento
+
+        indices = list(range(len(all_imgs)))
         random.seed(10)
-        random.shuffle(normal_paths)
-        random.shuffle(anomalous_paths)
-        
-        # 3. Gerar Splits
-        
-        # 70% de Normais para Treino (Domínio 'Normal')
-        n_train_normal = int(len(normal_paths) * 0.7)
-        train_paths = normal_paths[:n_train_normal]
-        
-        # O restante (30% Normais + Todos os Anômalos) vai para Validação e Teste
-        test_val_paths = normal_paths[n_train_normal:] + anomalous_paths
-        
-        # Distribuição de Validação/Teste (50%/50% do restante)
-        n_val = int(len(test_val_paths) * 0.5) 
-        
-        val_paths = test_val_paths[:n_val]
-        test_paths = test_val_paths[n_val:]
-        
-        # 4. Salvar os Splits (apenas os caminhos relativos)
-        split_paths = {"train": train_paths, "val": val_paths, "test": test_paths}
-        
+        random.shuffle(indices)
+
+        if name == 'brats':
+            n_train = int(len(indices) * 0.75)
+            n_val = int(len(indices) * 0.05)
+            n_test = len(indices) - n_train - n_val
+        elif name == 'atlas':
+            n_train = int(len(indices) * 0.75)
+            n_val = int(len(indices) * 0.05)
+            n_test = len(indices) - n_train - n_val
+        elif name == 'mmbrain':
+            n_train = 0
+            n_val = 5
+            n_test = len(indices) - n_train - n_val
+        elif name == 'MSLUB':
+            n_train = 20
+            n_val = 5
+            n_test = 5
+
+        split_indices = {}
+        split_indices["train"] = indices[:n_train]
+        split_indices["val"] = indices[n_train:n_train + n_val]
+        split_indices["test"] = indices[n_train + n_val:]
+
         for split in ["train", "val", "test"]:
             (splits_path / split).mkdir(parents=True, exist_ok=True)
             with open(splits_path / split / "scans.csv", "w") as f:
-                # Salva o caminho relativo da série
-                f.write("\n".join([str(p.relative_to(datapath)) for p in split_paths[split]]))
-                
-        print(f"Split de Treino (Normal): {len(train_paths)} séries")
-        print(f"Split de Validação (Normal/Anômalo): {len(val_paths)} séries")
-        print(f"Split de Teste (Normal/Anômalo): {len(test_paths)} séries")
-        
-    # --- Processamento e Salvamento de Fatias ---
-    
+                f.write("\n".join([all_imgs[idx].name for idx in split_indices[split]]))
+
     for split in ["train", "val", "test"]:
-        with open(splits_path / split / "scans.csv") as f:
-            # Reconstroi o caminho completo
-            paths = [datapath / x.strip() for x in f.readlines()]
+        paths = [datapath / x.strip() for x in open(splits_path / split / "scans.csv").readlines()]
 
-        print(f"\nIniciando Processamento de Fatias em [{split}]: {len(paths)} séries")
-
-        target_path = base_preprocess_dir / f"npy_{split}"
-        target_path.mkdir(parents=True, exist_ok=True)
-
+        print(f"Patients in {split}]: {len(paths)}")
 
         for source_path in tqdm(paths):
-            # A label é determinada para ser salva no arquivo label.txt
-            final_label = determine_label(source_path)
-            
-            # Garante que pacientes inválidos (label -1) não sejam processados/salvos
-            if final_label == -1:
-                continue
-
-            process_patient_series_slices(source_path, target_path, final_label)
+            target_path = datapath.parent / sub_dir / f"npy_{split}"
+            process_patient(name, source_path, target_path, mod, first, last, downsample=downsample)
 
 
 if __name__ == "__main__":
+   
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/BraTS21_training/BraTS21', type=str, help="path to Brats2021 Data directory")
+    parser.add_argument("--name", default='brats', type=str, help="dataset name")
+    parser.add_argument("-m", "--mod", default='all', type=str, help="modelity to preprocess")
+     
+    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/MSLUB/data', type=str, help="path to data directory")
+    # parser.add_argument("--name", default='MSLUB', type=str, help="dataset name")
+    # parser.add_argument("--mod", default='all', type=str, help="modelity to preprocess")
     
-    datapath = Path(dataset_dir)
+    # parser.add_argument("-s", "--source", default='/data/amciilab/yiming/DATA/ATLAS/raw2', type=str, help="path to data directory")
+    # parser.add_argument("--name", default='atlas', type=str, help="dataset name")
+    # parser.add_argument("--mod", default='t1', type=str, help="modelity to preprocess")
+     
+     
+    parser.add_argument("--first", default=0, 
+                        type=int, help="skip first n slices")
+    parser.add_argument("--last", default=0,
+                        type=int, help="skip last n slices")
     
-    print(f"Iniciando pré-processamento de fatias Fazekas para {MODALITY}...")
-    
-    preprocess(datapath)
+    args = parser.parse_args()
+
+    datapath = Path(args.source)
+   
+    preprocess(args.name, datapath, args.mod, args.first, args.last, downsample=True)
